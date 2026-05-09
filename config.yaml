@@ -1,24 +1,7 @@
-database:
-  host: "localhost"
-  port: 5432
-  dbname: "inventory"
-  user: "mercari"
-  password: "mercari"
+# Inventory Manager Configuration
+# Database passwords are loaded from .env via environment variables.
 
-mercari_hunter:
-  host: "localhost"
-  port: 5432
-  dbname: "mercari"
-  user: "mercari"
-  password: "mercari"
-
-amazon_outlet_hunter:
-  host: "localhost"
-  port: 5432
-  dbname: "amazon_outlet"
-  user: "amazon_outlet"
-  password: "amazon_outlet"
-
+# Server settings
 server:
   host: "0.0.0.0"
   port: 8080

@@ -6,28 +6,59 @@ Provides a sqlite3-compatible interface over psycopg2 so server.py code
 doesn't need to change: conn.execute(sql, params) works with ? placeholders.
 """
 
+import os
 import psycopg2
 import psycopg2.extras
-import yaml
+from dotenv import load_dotenv
 from pathlib import Path
 from typing import Any
 
-# ── Config ──────────────────────────────────────────────
-DB_CONFIG_PATH = Path(__file__).parent / "config.yaml"
+# Load .env file
+load_dotenv(Path(__file__).parent / ".env")
+
+
+def _env_db(prefix: str, defaults: dict) -> dict:
+    """Load DB config from environment variables with a given prefix."""
+    return {
+        "host": os.getenv(f"{prefix}_HOST", defaults.get("host", "localhost")),
+        "port": int(os.getenv(f"{prefix}_PORT", str(defaults.get("port", 5432)))),
+        "dbname": os.getenv(f"{prefix}_NAME", defaults.get("dbname", "")),
+        "user": os.getenv(f"{prefix}_USER", defaults.get("user", "")),
+        "password": os.getenv(f"{prefix}_PASSWORD", defaults.get("password", "")),
+    }
 
 
 def _load_db_config() -> dict:
-    if DB_CONFIG_PATH.exists():
-        with open(DB_CONFIG_PATH, "r") as f:
-            cfg = yaml.safe_load(f) or {}
-        return cfg.get("database", {})
-    return {
+    """Load inventory DB config from environment variables."""
+    return _env_db("INV", {
         "host": "localhost",
         "port": 5432,
         "dbname": "inventory",
         "user": "mercari",
-        "password": "mercari",
-    }
+        "password": "",
+    })
+
+
+def get_mercari_db_config() -> dict:
+    """Load Mercari Hunter DB config from environment variables."""
+    return _env_db("MERCARI", {
+        "host": "localhost",
+        "port": 5432,
+        "dbname": "mercari",
+        "user": "mercari",
+        "password": "",
+    })
+
+
+def get_amazon_db_config() -> dict:
+    """Load Amazon Outlet Hunter DB config from environment variables."""
+    return _env_db("AMAZON", {
+        "host": "localhost",
+        "port": 5432,
+        "dbname": "amazon_outlet",
+        "user": "amazon_outlet",
+        "password": "",
+    })
 
 
 SCHEMA_SQL = """

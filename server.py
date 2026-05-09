@@ -656,24 +656,14 @@ async def get_statuses():
         "label": STATUS_LABELS.get(s, s),
     } for s in VALID_STATUSES]
 
-# ── Scraper DB Config ───────────────────────────────────
-SCRAPER_CONFIG_PATH = Path(__file__).parent / "config.yaml"
-
-def _load_scraper_config() -> dict:
-    """Load scraper DB config from config.yaml."""
-    if SCRAPER_CONFIG_PATH.exists():
-        with open(SCRAPER_CONFIG_PATH, "r") as f:
-            return yaml.safe_load(f) or {}
-    return {}
-
-
+# ── Scraper DB Config (from env) ────────────────────────
 def get_mercari_pg_conn():
     """Get psycopg2 connection to mercari-hunter DB."""
     import psycopg2
-    cfg = _load_scraper_config()
-    db = cfg.get("mercari_hunter", {})
-    if not db:
-        raise HTTPException(503, "Mercari hunter not configured")
+    from db import get_mercari_db_config
+    db = get_mercari_db_config()
+    if not db.get("password"):
+        raise HTTPException(503, "Mercari hunter not configured (set MERCARI_DB_PASSWORD)")
     try:
         return psycopg2.connect(**db, connect_timeout=5)
     except Exception as e:
@@ -683,10 +673,10 @@ def get_mercari_pg_conn():
 def get_amazon_pg_conn():
     """Get psycopg2 connection to amazon-outlet-hunter DB."""
     import psycopg2
-    cfg = _load_scraper_config()
-    db = cfg.get("amazon_outlet_hunter", {})
-    if not db:
-        raise HTTPException(503, "Amazon outlet hunter not configured")
+    from db import get_amazon_db_config
+    db = get_amazon_db_config()
+    if not db.get("password"):
+        raise HTTPException(503, "Amazon outlet hunter not configured (set AMAZON_DB_PASSWORD)")
     try:
         return psycopg2.connect(**db, connect_timeout=5)
     except Exception as e:
