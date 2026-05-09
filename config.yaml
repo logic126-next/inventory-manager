@@ -1,0 +1,24 @@
+database:
+  host: "localhost"
+  port: 5432
+  dbname: "inventory"
+  user: "mercari"
+  password: "mercari"
+
+mercari_hunter:
+  host: "localhost"
+  port: 5432
+  dbname: "mercari"
+  user: "mercari"
+  password: "mercari"
+
+amazon_outlet_hunter:
+  host: "localhost"
+  port: 5432
+  dbname: "amazon_outlet"
+  user: "amazon_outlet"
+  password: "amazon_outlet"
+
+server:
+  host: "0.0.0.0"
+  port: 8080

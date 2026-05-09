@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>在庫管理 | Inventory Manager</title>
+<style>
+:root {
+  --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+  --border: #30363d; --text: #e6edf3; --text2: #8b949e;
+  --green: #3fb950; --red: #f85149; --blue: #58a6ff;
+  --yellow: #d29922; --purple: #bc8cff; --orange: #f0883e;
+  --radius: 10px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, 'Hiragino Sans', 'Meiryo', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+a { color: var(--blue); text-decoration: none; }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; background: var(--bg2); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+.tab { flex: 1; padding: 12px 8px; text-align: center; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; transition: .2s; color: var(--text2); user-select: none; }
+.tab:hover { color: var(--text); background: var(--bg3); }
+.tab.active { color: var(--blue); border-bottom-color: var(--blue); font-weight: 600; }
+
+/* Pages */
+.page { display: none; padding: 16px; max-width: 900px; margin: 0 auto; }
+.page.active { display: block; }
+
+/* Cards */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.card-title { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+
+/* Stat grid */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: center; }
+.stat-card .num { font-size: 24px; font-weight: 700; display: block; }
+.stat-card .label { font-size: 11px; color: var(--text2); margin-top: 4px; }
+.stat-card.green .num { color: var(--green); }
+.stat-card.blue .num { color: var(--blue); }
+.stat-card.yellow .num { color: var(--yellow); }
+.stat-card.red .num { color: var(--red); }
+.stat-card.purple .num { color: var(--purple); }
+
+/* Profit banner */
+.profit-banner { background: linear-gradient(135deg, #161b22, #1a2332); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.profit-banner .big { font-size: 28px; font-weight: 700; color: var(--green); }
+.profit-banner .sub { font-size: 13px; color: var(--text2); margin-top: 6px; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg3); color: var(--text); font-size: 13px; cursor: pointer; transition: .15s; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+.btn-primary:hover { opacity: 0.85; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-danger { color: var(--red); }
+.btn-danger:hover { background: rgba(248,81,73,0.15); }
+
+/* Forms */
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 14px; outline: none;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--blue); }
+.form-group textarea { resize: vertical; min-height: 60px; }
+
+/* Table */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--text2); font-weight: 500; font-size: 11px; text-transform: uppercase; }
+tr:hover td { background: var(--bg3); }
+
+/* Status badges */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-purchased { background: rgba(210,153,34,0.15); color: var(--yellow); }
+.badge-in_stock { background: rgba(63,185,80,0.15); color: var(--green); }
+.badge-listed { background: rgba(88,166,255,0.15); color: var(--blue); }
+.badge-sold { background: rgba(188,140,255,0.15); color: var(--purple); }
+.badge-settled { background: rgba(63,185,80,0.25); color: var(--green); }
+.badge-discarded { background: rgba(248,81,73,0.15); color: var(--red); }
+.badge-returned { background: rgba(240,136,62,0.15); color: var(--orange); }
+
+/* Filters */
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.filters input, .filters select { flex: 1; min-width: 120px; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; }
+
+/* Activity list */
+.activity-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.activity-item:last-child { border-bottom: none; }
+.activity-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.activity-time { color: var(--text2); font-size: 11px; white-space: nowrap; margin-left: auto; }
+
+/* Modal */
+.modal-overlay { display: none; position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.7); z-index: 200; align-items: center; justify-content: center; padding: 16px; }
+.modal-overlay.show { display: flex; }
+.modal { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; padding: 20px; }
+.modal h3 { margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+/* Profit bars */
+.bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.bar-label { width: 60px; flex-shrink: 0; text-align: right; color: var(--text2); }
+.bar-track { flex: 1; height: 20px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+.bar-value { width: 80px; flex-shrink: 0; font-weight: 600; }
+
+/* Responsive */
+@media (min-width: 600px) {
+  .stat-grid { grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 400px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .tab { font-size: 11px; padding: 10px 4px; }
+}
+
+/* Discovery cards */
+.disc-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; display: flex; gap: 12px; align-items: flex-start; }
+.disc-card img { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: var(--bg3); }
+.disc-card .disc-info { flex: 1; min-width: 0; }
+.disc-card .disc-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disc-card .disc-meta { font-size: 11px; color: var(--text2); }
+.disc-card .disc-price { font-size: 16px; font-weight: 700; color: var(--green); white-space: nowrap; }
+.disc-card .disc-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.disc-card.selected { border-color: var(--blue); background: rgba(88,166,255,0.05); }
+input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active" data-page="dashboard">📊 看板</div>
+  <div class="tab" data-page="inventory">📦 在庫</div>
+  <div class="tab" data-page="discovery">🔍 発見</div>
+  <div class="tab" data-page="profit">💰 利益</div>
+</div>
+
+<!-- ════════ Dashboard ════════ -->
+<div id="page-dashboard" class="page active">
+  <div class="profit-banner" id="dash-profit"></div>
+  <div class="stat-grid" id="dash-status"></div>
+  <div class="card">
+    <div class="card-title">最近の活動</div>
+    <div id="dash-activity"><p style="color:var(--text2);font-size:13px">読み込み中...</p></div>
+  </div>
+</div>
+
+<!-- ════════ Inventory ════════ -->
+<div id="page-inventory" class="page">
+  <div class="filters">
+    <input type="text" id="inv-search" placeholder="🔍 商品名で検索...">
+    <select id="inv-status"><option value="">全状態</option></select>
+    <select id="inv-platform"><option value="">全平台</option><option value="mercari">Mercari</option><option value="amazon_outlet">Amazon</option><option value="other">その他</option></select>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <span id="inv-count" style="font-size:13px;color:var(--text2)"></span>
+    <button class="btn btn-primary" onclick="showAddItemModal()">+ 新規登録</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>商品</th><th>状態</th><th>購入額</th><th>売価</th><th>利益</th><th></th></tr></thead>
+      <tbody id="inv-table"></tbody>
+    </table>
+  </div>
+  <div style="text-align:center;padding:12px">
+    <button class="btn btn-sm" id="inv-prev" onclick="invLoadPage(-1)" style="display:none">← 前へ</button>
+    <span id="inv-page-info" style="font-size:12px;color:var(--text2);padding:0 12px"></span>
+    <button class="btn btn-sm" id="inv-next" onclick="invLoadPage(1)" style="display:none">次へ →</button>
+  </div>
+</div>
+
+<!-- ════════ Profit ════════ -->
+<div id="page-profit" class="page">
+  <div class="stat-grid" id="profit-overview"></div>
+  <div class="card">
+    <div class="card-title">プラットフォーム別利益</div>
+    <div id="profit-platform"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">月別推移</div>
+    <div id="profit-monthly"></div>
+  </div>
+</div>
+
+<!-- ════════ Discovery ════════ -->
+<div id="page-discovery" class="page">
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <button class="btn btn-primary" id="src-mercari" onclick="loadScraperSource('mercari')">🛍 Mercari Hunter</button>
+    <button class="btn" id="src-amazon" onclick="loadScraperSource('amazon_outlet')">📦 Amazon Outlet</button>
+  </div>
+  <div id="discovery-empty" style="text-align:center;padding:60px 20px;color:var(--text2)">
+    <div style="font-size:48px;margin-bottom:12px">🔍</div>
+    <div>データソースを選択して、発見した商品を一覧表示</div>
+    <div style="font-size:12px;margin-top:8px">Mercari / Amazon から見つけた商品を一括で在庫に追加できます</div>
+  </div>
+  <div id="discovery-content" style="display:none">
+    <div class="filters">
+      <input type="text" id="disc-search" placeholder="🔍 商品名で検索...">
+      <div style="display:flex;gap:8px;flex:1;min-width:200px">
+        <input type="number" id="disc-price-min" placeholder="最低価格" style="flex:1">
+        <input type="number" id="disc-price-max" placeholder="最高価格" style="flex:1">
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span id="disc-count" style="font-size:13px;color:var(--text2)"></span>
+      <button class="btn btn-primary btn-sm" onclick="importSelectedAll()">📥 選択済みを一括入库</button>
+    </div>
+    <div id="disc-list"></div>
+    <div style="text-align:center;padding:12px">
+      <button class="btn btn-sm" id="disc-prev" onclick="discLoadPage(-1)" style="display:none">← 前へ</button>
+      <span id="disc-page-info" style="font-size:12px;color:var(--text2);padding:0 12px"></span>
+      <button class="btn btn-sm" id="disc-next" onclick="discLoadPage(1)" style="display:none">次へ →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ Add Item Modal ════════ -->
+<div class="modal-overlay" id="modal-add-item">
+  <div class="modal">
+    <h3>📦 新規登録</h3>
+    <div class="form-group"><label>商品名</label><input id="add-name" required></div>
+    <div class="form-group"><label>購入元のプラットフォーム</label>
+      <select id="add-platform"><option value="mercari">Mercari</option><option value="amazon_outlet">Amazon Outlet</option><option value="other">その他</option></select>
+    </div>
+    <div class="form-group"><label>購入価格 (¥)</label><input id="add-price" type="number" min="0" value="0"></div>
+    <div class="form-group"><label>購入日</label><input id="add-date" type="date"></div>
+    <div class="form-group"><label>商品URL</label><input id="add-url" placeholder="https://..."></div>
+    <div class="form-group"><label>画像URL</label><input id="add-image" placeholder="https://..."></div>
+    <div class="form-group"><label>タグ (カンマ区切り)</label><input id="add-tags" placeholder="3C, 限定, ゲーム機"></div>
+    <div class="form-group"><label>メモ</label><textarea id="add-desc"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-add-item')">キャンセル</button>
+      <button class="btn btn-primary" onclick="submitAddItem()">登録する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ Item Detail Modal ════════ -->
+<div class="modal-overlay" id="modal-item-detail">
+  <div class="modal" id="item-detail-content"></div>
+</div>
+
+<!-- ════════ Sale Modal ════════ -->
+<div class="modal-overlay" id="modal-sale">
+  <div class="modal">
+    <h3>💰 販売記録</h3>
+    <input type="hidden" id="sale-item-id">
+    <div class="form-group"><label>販売価格 (¥)</label><input id="sale-price" type="number" min="1"></div>
+    <div class="form-group"><label>販売プラットフォーム</label>
+      <select id="sale-platform"><option value="mercari">Mercari</option><option value="amazon">Amazon</option><option value="other">その他</option></select>
+    </div>
+    <div class="form-group"><label>手数料 (¥)</label><input id="sale-fee" type="number" min="0" value="0"></div>
+    <div class="form-group"><label>送料 (¥)</label><input id="sale-ship" type="number" min="0" value="0"></div>
+    <div class="form-group"><label>日付</label><input id="sale-date" type="date"></div>
+    <div class="form-group"><label>メモ</label><textarea id="sale-note"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-sale')">キャンセル</button>
+      <button class="btn btn-primary" onclick="submitSale()">記録する</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── API ──────────────────────────────────────────
+const API = '';
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Format ───────────────────────────────────────
+function yen(n) { return n != null ? '¥' + Number(n).toLocaleString() : '—'; }
+function fmtDate(d) { return d ? d.split('T')[0].split('-').slice(1).join('/') : ''; }
+function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins + '分前';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + '時間前';
+  const days = Math.floor(hrs / 24);
+  return days + '日前';
+}
+
+// ── Tabs ─────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('page-' + tab.dataset.page).classList.add('active');
+    if (tab.dataset.page === 'dashboard') loadDashboard();
+    if (tab.dataset.page === 'inventory') loadInventory();
+    if (tab.dataset.page === 'profit') loadProfit();
+  });
+});
+
+// ── Modals ───────────────────────────────────────
+function showModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
+});
+
+// ══════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════
+async function loadDashboard() {
+  try {
+    const d = await api('/api/dashboard/summary');
+
+    // Profit banner
+    document.getElementById('dash-profit').innerHTML = `
+      <div class="big">${yen(d.total_profit)}</div>
+      <div class="sub">累計利益 | 今月: ${yen(d.month_profit)} | 利益率: ${d.profit_margin}%</div>
+    `;
+
+    // Status cards
+    const colors = { purchased: 'yellow', in_stock: 'green', listed: 'blue', sold: 'purple', settled: 'green', discarded: 'red', returned: 'orange' };
+    const labels = { purchased: '購入済み', in_stock: '在庫', listed: '出品済み', sold: '販売済み', settled: '決済済み', discarded: '廃棄', returned: '返品' };
+    let statusHtml = '';
+    for (const [k, v] of Object.entries(d.status_counts)) {
+      statusHtml += `<div class="stat-card ${colors[k] || ''}"><span class="num">${v}</span><span class="label">${labels[k] || k}</span></div>`;
+    }
+    document.getElementById('dash-status').innerHTML = statusHtml;
+
+    // Activity
+    if (d.recent_activity.length === 0) {
+      document.getElementById('dash-activity').innerHTML = '<p style="color:var(--text2);font-size:13px">まだ記録はありません</p>';
+    } else {
+      const dotColors = { purchased: 'var(--yellow)', in_stock: 'var(--green)', listed: 'var(--blue)', sold: 'var(--purple)', settled: 'var(--green)', discarded: 'var(--red)', returned: 'var(--orange)' };
+      document.getElementById('dash-activity').innerHTML = d.recent_activity.map(a => `
+        <div class="activity-item">
+          <div class="activity-dot" style="background:${dotColors[a.to_status] || 'var(--text2)'}"></div>
+          <div><strong>${a.item_name || '商品'}</strong> → ${labels[a.to_status] || a.to_status}${a.note ? ' (' + a.note + ')' : ''}</div>
+          <span class="activity-time">${timeAgo(a.changed_at)}</span>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    console.error('Dashboard load failed:', e);
+  }
+}
+
+// ══════════════════════════════════════════════════
+// INVENTORY
+// ══════════════════════════════════════════════════
+let invPage = 1;
+let statuses = [];
+
+async function initInventory() {
+  try {
+    statuses = await api('/api/statuses');
+    const sel = document.getElementById('inv-status');
+    statuses.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.code; opt.textContent = s.label;
+      sel.appendChild(opt);
+    });
+  } catch(e) { console.error(e); }
+}
+
+async function loadInventory() {
+  const search = document.getElementById('inv-search').value;
+  const status = document.getElementById('inv-status').value;
+  const platform = document.getElementById('inv-platform').value;
+
+  const params = new URLSearchParams({ page: invPage, per_page: 50 });
+  if (search) params.set('search', search);
+  if (status) params.set('status', status);
+  if (platform) params.set('platform', platform);
+
+  try {
+    const data = await api('/api/items?' + params.toString());
+    const tbody = document.getElementById('inv-table');
+
+    if (data.items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:40px">商品が見つかりません</td></tr>';
+    } else {
+      tbody.innerHTML = data.items.map(item => {
+        const sale = item.sale || {};
+        const profit = sale.net_profit != null ? (sale.net_profit >= 0 ? `+${yen(sale.net_profit)}` : yen(sale.net_profit)) : '—';
+        return `<tr>
+          <td style="cursor:pointer;color:var(--blue)" onclick="showItemDetail(${item.id})">${item.name}</td>
+          <td><span class="badge badge-${item.status}">${item.status}</span></td>
+          <td>${yen(item.purchase_price)}</td>
+          <td>${sale.sale_price ? yen(sale.sale_price) : '—'}</td>
+          <td>${profit}</td>
+          <td><button class="btn btn-sm" onclick="showItemDetail(${item.id})">詳細</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    document.getElementById('inv-count').textContent = `合計 ${data.total} 件`;
+    document.getElementById('inv-page-info').textContent = `Page ${data.page}`;
+    document.getElementById('inv-prev').style.display = data.page > 1 ? '' : 'none';
+    document.getElementById('inv-next').style.display = data.items.length >= data.per_page ? '' : 'none';
+  } catch(e) { console.error(e); }
+}
+
+function invLoadPage(delta) {
+  invPage += delta;
+  loadInventory();
+}
+
+// Debounce search
+let searchTimer;
+document.getElementById('inv-search').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { invPage = 1; loadInventory(); }, 300);
+});
+document.getElementById('inv-status').addEventListener('change', () => { invPage = 1; loadInventory(); });
+document.getElementById('inv-platform').addEventListener('change', () => { invPage = 1; loadInventory(); });
+
+// Add item
+function showAddItemModal() {
+  document.getElementById('add-name').value = '';
+  document.getElementById('add-price').value = '0';
+  document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('add-url').value = '';
+  document.getElementById('add-image').value = '';
+  document.getElementById('add-tags').value = '';
+  document.getElementById('add-desc').value = '';
+  showModal('modal-add-item');
+}
+
+async function submitAddItem() {
+  const name = document.getElementById('add-name').value.trim();
+  if (!name) { alert('商品名を入力してください'); return; }
+
+  const tagsStr = document.getElementById('add-tags').value;
+  const tags = tagsStr ? tagsStr.split(/[,、]/).map(t => t.trim()).filter(Boolean) : [];
+
+  try {
+    await api('/api/items', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        source_platform: document.getElementById('add-platform').value,
+        purchase_price: parseInt(document.getElementById('add-price').value) || 0,
+        purchase_date: document.getElementById('add-date').value,
+        source_url: document.getElementById('add-url').value,
+        image_url: document.getElementById('add-image').value,
+        tags,
+        description: document.getElementById('add-desc').value,
+      }),
+    });
+    closeModal('modal-add-item');
+    invPage = 1;
+    loadInventory();
+  } catch(e) { alert('エラー: ' + e.message); }
+}
+
+// Item detail
+async function showItemDetail(id) {
+  try {
+    const data = await api(`/api/items/${id}`);
+    const item = data.item;
+    const labels = { purchased: '購入済み', in_stock: '在庫', listed: '出品済み', sold: '販売済み', settled: '決済済み', discarded: '廃棄', returned: '返品' };
+
+    let salesHtml = '';
+    if (data.sales.length) {
+      salesHtml = data.sales.map(s => `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <strong>${yen(s.sale_price)}</strong> (${s.sale_platform}) ${s.sale_date ? ' — ' + fmtDate(s.sale_date) : ''}
+          <br>手数料: ${yen(s.platform_fee)} | 送料: ${yen(s.shipping_cost)} | <strong>利益: ${yen(s.net_profit)}</strong>
+          ${s.settled ? '<span class="badge badge-settled">決済済み</span>' : '<span style="color:var(--yellow);font-size:11px">未決済</span>'}
+        </div>
+      `).join('');
+    } else {
+      salesHtml = '<p style="color:var(--text2);font-size:13px">販売記録はありません</p>';
+    }
+
+    let historyHtml = data.history.map(h => `
+      <div style="font-size:12px;padding:4px 0;color:var(--text2)">
+        ${h.from_status ? labels[h.from_status] + ' → ' : ''}${labels[h.to_status] || h.to_status}
+        ${h.note ? ' (' + h.note + ')' : ''} <span style="color:var(--text2)">${timeAgo(h.changed_at)}</span>
+      </div>
+    `).join('');
+
+    const nextStatuses = getNextStatuses(item.status);
+    let statusBtns = nextStatuses.map(s =>
+      `<button class="btn btn-sm" onclick="changeStatus(${id}, '${s.code}')">${s.label}</button>`
+    ).join(' ');
+
+    const content = document.getElementById('item-detail-content');
+    content.innerHTML = `
+      <h3>${item.name}</h3>
+      ${item.image_url ? `<div style="margin-bottom:12px"><img src="${item.image_url}" style="max-width:100%;border-radius:8px;max-height:200px;object-fit:cover"></div>` : ''}
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">SKU: ${item.sku}</div>
+      <div style="margin-bottom:12px">
+        <span class="badge badge-${item.status}" style="font-size:13px;padding:4px 12px">${labels[item.status] || item.status}</span>
+      </div>
+      <div style="font-size:13px;margin-bottom:16px">
+        <div>購入価格: <strong>${yen(item.purchase_price)}</strong></div>
+        <div>購入元: ${item.source_platform} ${item.purchase_date ? ' | ' + fmtDate(item.purchase_date) : ''}</div>
+        ${item.location_name ? '<div>場所: ' + item.location_name + '</div>' : ''}
+        ${item.tags && JSON.parse(item.tags).length ? '<div>タグ: ' + JSON.parse(item.tags).map(t => '#' + t).join(' ') + '</div>' : ''}
+        ${item.source_url ? '<div><a href="' + item.source_url + '" target="_blank">商品リンク ↗</a></div>' : ''}
+        ${item.description ? '<div style="margin-top:8px;color:var(--text2)">' + item.description + '</div>' : ''}
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-title">状態変更</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${statusBtns || '<span style="color:var(--text2);font-size:12px">完了状態です</span>'}</div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-title">販売記録</div>
+        ${salesHtml}
+      </div>
+      <div class="card">
+        <div class="card-title">履歴</div>
+        ${historyHtml}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-primary" onclick="showSaleModal(${id})">💰 販売記録</button>
+        <button class="btn btn-danger" onclick="deleteItem(${id})">🗑 削除</button>
+        <button class="btn" onclick="closeModal('modal-item-detail')" style="margin-left:auto">閉じる</button>
+      </div>
+    `;
+    showModal('modal-item-detail');
+  } catch(e) { alert('エラー: ' + e.message); }
+}
+
+function getNextStatuses(current) {
+  const transitions = {
+    purchased: ['in_stock', 'discarded'],
+    in_stock: ['listed', 'discarded'],
+    listed: ['sold', 'in_stock', 'discarded'],
+    sold: ['settled', 'returned'],
+    returned: ['in_stock', 'discarded'],
+  };
+  const codes = transitions[current] || [];
+  const labels = { in_stock: '在庫へ', listed: '出品する', sold: '販売完了', settled: '決済済み', discarded: '廃棄', returned: '返品' };
+  return codes.map(c => ({ code: c, label: labels[c] || c }));
+}
+
+async function changeStatus(id, to_status) {
+  try {
+    await api(`/api/items/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ to_status, note: '' }),
+    });
+    closeModal('modal-item-detail');
+    loadInventory();
+    if (document.querySelector('.tab.active').dataset.page === 'dashboard') loadDashboard();
+  } catch(e) { alert('エラー: ' + e.message); }
+}
+
+// Sale
+function showSaleModal(itemId) {
+  document.getElementById('sale-item-id').value = itemId;
+  document.getElementById('sale-price').value = '';
+  document.getElementById('sale-fee').value = '0';
+  document.getElementById('sale-ship').value = '0';
+  document.getElementById('sale-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('sale-note').value = '';
+  closeModal('modal-item-detail');
+  showModal('modal-sale');
+}
+
+async function submitSale() {
+  const itemId = document.getElementById('sale-item-id').value;
+  const price = parseInt(document.getElementById('sale-price').value);
+  if (!price || price <= 0) { alert('販売価格を入力してください'); return; }
+
+  try {
+    await api(`/api/items/${itemId}/sale`, {
+      method: 'POST',
+      body: JSON.stringify({
+        sale_price: price,
+        sale_platform: document.getElementById('sale-platform').value,
+        platform_fee: parseInt(document.getElementById('sale-fee').value) || 0,
+        shipping_cost: parseInt(document.getElementById('sale-ship').value) || 0,
+        sale_date: document.getElementById('sale-date').value,
+        note: document.getElementById('sale-note').value,
+      }),
+    });
+    closeModal('modal-sale');
+    loadInventory();
+  } catch(e) { alert('エラー: ' + e.message); }
+}
+
+async function deleteItem(id) {
+  if (!confirm('本当に削除しますか？')) return;
+  try {
+    await api(`/api/items/${id}`, { method: 'DELETE' });
+    closeModal('modal-item-detail');
+    loadInventory();
+  } catch(e) { alert('エラー: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════
+// PROFIT
+// ══════════════════════════════════════════════════
+async function loadProfit() {
+  try {
+    // Overview
+    const summary = await api('/api/dashboard/summary');
+    document.getElementById('profit-overview').innerHTML = `
+      <div class="stat-card blue"><span class="num">${yen(summary.total_revenue)}</span><span class="label">総収入</span></div>
+      <div class="stat-card red"><span class="num">${yen(summary.total_cost)}</span><span class="label">総原価</span></div>
+      <div class="stat-card yellow"><span class="num">${yen(summary.total_fees)}</span><span class="label">手数料</span></div>
+      <div class="stat-card green"><span class="num">${yen(summary.total_profit)}</span><span class="label">純利益</span></div>
+    `;
+
+    // Platform breakdown
+    const platforms = await api('/api/dashboard/profit');
+    const maxProfit = Math.max(...platforms.map(p => p.profit || 0), 1);
+    document.getElementById('profit-platform').innerHTML = platforms.map(p => `
+      <div class="bar-row">
+        <span class="bar-label">${p.sale_platform}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${(p.profit / maxProfit * 100).toFixed(1)}%;background:var(--green)"></div></div>
+        <span class="bar-value">${yen(p.profit)} (${p.count}件)</span>
+      </div>
+    `).join('') || '<p style="color:var(--text2);font-size:13px">データがありません</p>';
+
+    // Monthly
+    const monthly = await api('/api/dashboard/profit/monthly?months=6');
+    const maxMonth = Math.max(...monthly.map(m => m.profit || 0), 1);
+    document.getElementById('profit-monthly').innerHTML = monthly.map(m => `
+      <div class="bar-row">
+        <span class="bar-label">${m.month}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${(m.profit / maxMonth * 100).toFixed(1)}%;background:var(--blue)"></div></div>
+        <span class="bar-value">${yen(m.profit)}</span>
+      </div>
+    `).join('') || '<p style="color:var(--text2);font-size:13px">データがありません</p>';
+
+  } catch(e) { console.error(e); }
+}
+
+// ── Init ─────────────────────────────────────────
+loadDashboard();
+initInventory();
+
+// ══════════════════════════════════════════════════
+// DISCOVERY (Scraper Integration)
+// ══════════════════════════════════════════════════
+let discSource = null; // 'mercari' or 'amazon_outlet'
+let discPage = 1;
+let discSelected = new Set();
+
+function loadScraperSource(source) {
+  discSource = source;
+  discPage = 1;
+  discSelected.clear();
+  document.getElementById('discovery-empty').style.display = 'none';
+  document.getElementById('discovery-content').style.display = 'block';
+  document.getElementById('src-mercari').className = source === 'mercari' ? 'btn btn-primary' : 'btn';
+  document.getElementById('src-amazon').className = source === 'amazon_outlet' ? 'btn btn-primary' : 'btn';
+  loadDiscoveryItems();
+}
+
+async function loadDiscoveryItems() {
+  if (!discSource) return;
+  const search = document.getElementById('disc-search').value;
+  const priceMin = document.getElementById('disc-price-min').value;
+  const priceMax = document.getElementById('disc-price-max').value;
+
+  const params = new URLSearchParams({ page: discPage, per_page: 30 });
+  if (search) params.set('search', search);
+  if (priceMin) params.set('price_min', priceMin);
+  if (priceMax) params.set('price_max', priceMax);
+
+  const url = `/api/scrapers/${discSource}/items?${params.toString()}`;
+  try {
+    const data = await api(url);
+    renderDiscoveryItems(data);
+  } catch(e) {
+    document.getElementById('disc-list').innerHTML = `<div style="text-align:center;padding:40px;color:var(--red)">エラー: ${e.message}</div>`;
+  }
+}
+
+function renderDiscoveryItems(data) {
+  const container = document.getElementById('disc-list');
+  if (!data.items || data.items.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">商品が見つかりません</div>';
+    document.getElementById('disc-count').textContent = '0 件';
+    return;
+  }
+
+  container.innerHTML = data.items.map(item => {
+    const id = discSource === 'mercari' ? item.id : item.asin;
+    const name = discSource === 'mercari' ? item.name : item.title;
+    const price = item.price;
+    const imgUrl = item.image_url || '';
+    const url = item.url || '';
+    const selected = discSelected.has(id);
+
+    let meta = '';
+    if (discSource === 'mercari') {
+      meta = [item.brand, item.category, item.condition].filter(Boolean).join(' · ') || 'Mercari';
+    } else {
+      meta = [];
+      if (item.category) meta.push(item.category);
+      if (item.discount_percent) meta.push(`-${item.discount_percent}%`);
+      if (item.original_price) meta.push(`元: ${yen(item.original_price)}`);
+      meta = meta.join(' · ') || 'Amazon';
+    }
+
+    return `
+      <div class="disc-card ${selected ? 'selected' : ''}" data-id="${id}">
+        <input type="checkbox" class="disc-check" ${selected ? 'checked' : ''} onchange="toggleDiscSelect('${id}', this.checked)">
+        ${imgUrl ? `<img src="${imgUrl}" loading="lazy" onerror="this.style.display='none'">` : '<div style="width:60px;height:60px;flex-shrink:0;background:var(--bg3);border-radius:6px"></div>'}
+        <div class="disc-info">
+          <div class="disc-name" title="${name}">${name}</div>
+          <div class="disc-meta">${meta}</div>
+          ${url ? `<div class="disc-meta"><a href="${url}" target="_blank" style="color:var(--blue)">リンク ↗</a></div>` : ''}
+        </div>
+        <div class="disc-price">${yen(price)}</div>
+        <div class="disc-actions">
+          <button class="btn btn-primary btn-sm" onclick="importSingleItem('${id}')">📥 入库</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('disc-count').textContent = `${data.total} 件中 ${data.items.length} 件表示`;
+  document.getElementById('disc-page-info').textContent = `Page ${data.page}`;
+  document.getElementById('disc-prev').style.display = data.page > 1 ? '' : 'none';
+  document.getElementById('disc-next').style.display = data.items.length >= 30 ? '' : 'none';
+}
+
+function toggleDiscSelect(id, checked) {
+  const card = document.querySelector(`.disc-card[data-id="${id}"]`);
+  if (checked) {
+    discSelected.add(id);
+    if (card) card.classList.add('selected');
+  } else {
+    discSelected.delete(id);
+    if (card) card.classList.remove('selected');
+  }
+  document.getElementById('disc-count').textContent = `${document.getElementById('disc-count').textContent.split(' 件中')[0]} 件中 ${discSelected.size} 件選択`;
+}
+
+function discLoadPage(delta) {
+  discPage += delta;
+  loadDiscoveryItems();
+}
+
+async function importSingleItem(id) {
+  try {
+    const url = discSource === 'mercari'
+      ? `/api/scrapers/mercari/items/${id}/import`
+      : `/api/scrapers/amazon/items/${id}/import`;
+    const result = await api(url, { method: 'POST' });
+    alert(`✅ 入库成功! SKU: ${result.sku}`);
+    discSelected.delete(id);
+    loadDiscoveryItems();
+  } catch(e) {
+    alert('エラー: ' + e.message);
+  }
+}
+
+async function importSelectedAll() {
+  if (discSelected.size === 0) {
+    alert('请先选择要入库的商品');
+    return;
+  }
+  const count = discSelected.size;
+  let success = 0, failed = 0;
+  for (const id of discSelected) {
+    try {
+      const url = discSource === 'mercari'
+        ? `/api/scrapers/mercari/items/${id}/import`
+        : `/api/scrapers/amazon/items/${id}/import`;
+      await api(url, { method: 'POST' });
+      success++;
+    } catch(e) {
+      console.error(`Import failed for ${id}:`, e);
+      failed++;
+    }
+  }
+  discSelected.clear();
+  loadDiscoveryItems();
+  alert(`✅ 一括入库完成: ${success} 件成功${failed > 0 ? `, ${failed} 件失败` : ''}`);
+}
+
+// Debounce search for discovery
+let discSearchTimer;
+document.getElementById('disc-search').addEventListener('input', () => {
+  clearTimeout(discSearchTimer);
+  discSearchTimer = setTimeout(() => { discPage = 1; loadDiscoveryItems(); }, 300);
+});
+document.getElementById('disc-price-min').addEventListener('change', () => { discPage = 1; loadDiscoveryItems(); });
+document.getElementById('disc-price-max').addEventListener('change', () => { discPage = 1; loadDiscoveryItems(); });
+</script>
+</body>
+</html>
