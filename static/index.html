@@ -263,7 +263,10 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
 
 <script>
 // ── API ──────────────────────────────────────────
-const API = '';
+// Auto-detect base path for reverse proxy support (e.g. /inventory/)
+const pathParts = window.location.pathname.split('/');
+const basePath = pathParts.length > 2 ? '/' + pathParts[1] : '';
+const API = basePath;
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
