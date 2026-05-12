@@ -145,7 +145,7 @@ async def list_items(
             where.append("source_platform = ?")
             params.append(platform)
         if search:
-            where.append("(name LIKE ? OR description LIKE ?)")
+            where.append("(i.name LIKE ? OR i.description LIKE ?)")
             params.extend([f"%{search}%", f"%{search}%"])
 
         where_sql = " WHERE " + " AND ".join(where) if where else ""
@@ -159,7 +159,7 @@ async def list_items(
         ).fetchall()
 
         total = conn.execute(
-            f"SELECT COUNT(*) FROM items{where_sql}", params
+            f"SELECT COUNT(*) FROM items i LEFT JOIN locations l ON i.location_id = l.id{where_sql}", params
         ).fetchone()[0]
 
         # Get latest sale record for each item
@@ -912,6 +912,90 @@ async def import_amazon_item(asin: str):
         return {"id": cursor.lastrowid, "sku": sku, "status": "imported"}
     finally:
         inv_conn.close()
+
+
+# ── Mercari Owned Items Sync ────────────────────────────
+class MercariOwnedItem(BaseModel):
+    name: str
+    price: int
+    status: str = ""
+
+
+class MercariOwnedBatch(BaseModel):
+    items: list[MercariOwnedItem]
+
+
+@app.post("/api/scrapers/mercari/owned/sync")
+async def sync_mercari_owned(batch: MercariOwnedBatch):
+    """Batch import items from Mercari 持ち物一覧 page."""
+    conn = get_connection()
+    try:
+        created = 0
+        updated = 0
+        skipped = 0
+
+        for item in batch.items:
+            name = item.name.strip()
+            price = item.price
+            status_text = item.status or ""
+
+            # Determine inventory status
+            if "出品中" in status_text:
+                inv_status = "listed"
+            elif "出品する" in status_text:
+                inv_status = "in_stock"
+            else:
+                inv_status = "in_stock"
+
+            # Check if item already exists (by name + price + platform)
+            existing = conn.execute(
+                "SELECT id, status FROM items "
+                "WHERE name = ? AND purchase_price = ? AND source_platform = 'mercari_owned'",
+                (name, price),
+            ).fetchone()
+
+            if existing:
+                # Update status if changed
+                if existing["status"] != inv_status:
+                    conn.execute(
+                        "UPDATE items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (inv_status, existing["id"]),
+                    )
+                    conn.commit()
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                # Create new item
+                sku = generate_sku()
+                tags_json = dict_to_json(["mercari_owned"])
+                purchase_date = datetime.now().strftime("%Y-%m-%d")
+
+                cursor = conn.execute(
+                    "INSERT INTO items (sku, name, description, source_platform, source_item_id, "
+                    "purchase_price, purchase_date, image_url, source_url, location_id, status, tags) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (sku, name, "", "mercari_owned", None,
+                     price, purchase_date, None, None, None,
+                     inv_status, tags_json),
+                )
+
+                conn.execute(
+                    "INSERT INTO status_history (item_id, from_status, to_status, note) "
+                    "VALUES (?, NULL, ?, 'Mercari持ち物同期')",
+                    (cursor.lastrowid, inv_status),
+                )
+                conn.commit()
+                created += 1
+
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "total": len(batch.items),
+        }
+    finally:
+        conn.close()
 
 
 # ── Frontend ────────────────────────────────────────────
