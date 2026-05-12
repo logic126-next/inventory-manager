@@ -269,10 +269,10 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   console.log('URL:', window.location.href);
 
  // ── Collect all item links in document order ──
-  // Mercari uses various href patterns: /items/{id}, /mypage/inventory/items/{id}, etc.
+  // Mercari inventory page uses href like /inventory/m24943521920
   const allLinks = Array.from(document.querySelectorAll('a')).filter(a => {
-    const href = a.getAttribute('href') || '';
-    return href.includes('/items/') || href.includes('/item/');
+    const href = a.getAttribute('href') || a.href || '';
+    return href.includes('/inventory/') || href.includes('/items/') || href.includes('/item/');
   }).map(a => a.href);
   const links = [...new Set(allLinks)]; // deduplicate
   console.log(`🔗 見つかったリンク: ${links.length} 件`);
