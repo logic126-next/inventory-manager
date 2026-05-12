@@ -19,12 +19,13 @@ load_dotenv(Path(__file__).parent / ".env")
 
 def _env_db(prefix: str, defaults: dict) -> dict:
     """Load DB config from environment variables with a given prefix."""
+    env_prefix = f"{prefix}_DB"
     return {
-        "host": os.getenv(f"{prefix}_HOST", defaults.get("host", "localhost")),
-        "port": int(os.getenv(f"{prefix}_PORT", str(defaults.get("port", 5432)))),
-        "dbname": os.getenv(f"{prefix}_NAME", defaults.get("dbname", "")),
-        "user": os.getenv(f"{prefix}_USER", defaults.get("user", "")),
-        "password": os.getenv(f"{prefix}_PASSWORD", defaults.get("password", "")),
+        "host": os.getenv(f"{env_prefix}_HOST", defaults.get("host", "localhost")),
+        "port": int(os.getenv(f"{env_prefix}_PORT", str(defaults.get("port", 5432)))),
+        "dbname": os.getenv(f"{env_prefix}_NAME", defaults.get("dbname", "")),
+        "user": os.getenv(f"{env_prefix}_USER", defaults.get("user", "")),
+        "password": os.getenv(f"{env_prefix}_PASSWORD", defaults.get("password", "")),
     }
 
 
