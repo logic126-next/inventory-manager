@@ -698,7 +698,7 @@ async def scraper_sources():
     if cfg.get("amazon_outlet_hunter"):
         sources.append({
             "id": "amazon_outlet",
-            "name": "Amazon Outlet Hunter",
+            "name": "Amazon Hunter",
             "configured": True,
         })
     return {"sources": sources}
@@ -905,7 +905,7 @@ async def import_amazon_item(asin: str):
         )
         inv_conn.execute(
             "INSERT INTO status_history (item_id, from_status, to_status, note) "
-            "VALUES (?, NULL, 'purchased', 'Amazon Outlet Hunter からインポート')",
+            "VALUES (?, NULL, 'purchased', 'Amazon Hunter からインポート')",
             (cursor.lastrowid,),
         )
         inv_conn.commit()
