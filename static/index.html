@@ -268,10 +268,15 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   console.log('=== Mercari 持ち物一覧 解析開始 ===');
   console.log('URL:', window.location.href);
 
-  // ── Collect /items/ links in document order ──
-  const links = Array.from(document.querySelectorAll('a[href*="/items/"]'))
-    .map(a => a.href);
+ // ── Collect all item links in document order ──
+  // Mercari uses various href patterns: /items/{id}, /mypage/inventory/items/{id}, etc.
+  const allLinks = Array.from(document.querySelectorAll('a')).filter(a => {
+    const href = a.getAttribute('href') || '';
+    return href.includes('/items/') || href.includes('/item/');
+  }).map(a => a.href);
+  const links = [...new Set(allLinks)]; // deduplicate
   console.log(`🔗 見つかったリンク: ${links.length} 件`);
+  if (links.length > 0) console.log(`  例: ${links[0]}`);
   if (links.length === 0) {
     console.warn('⚠️ /items/ リンクが見つかりません – 正しいページですか？');
   }

@@ -932,6 +932,12 @@ class MercariOwnedBatch(BaseModel):
 @app.post("/api/scrapers/mercari/owned/sync")
 async def sync_mercari_owned(batch: MercariOwnedBatch):
     """Batch import items from Mercari 持ち物一覧 page."""
+    import logging
+    logger = logging.getLogger("uvicorn.error")
+    # Debug: log first item to check URL
+    if batch.items:
+        first = batch.items[0]
+        logger.warning(f"DEBUG sync item[0]: name={first.name}, url={getattr(first, 'url', 'MISSING_FIELD')}")
     conn = get_connection()
     try:
         created = 0
