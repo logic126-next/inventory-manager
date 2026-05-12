@@ -282,18 +282,28 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   }
 
   // ── Collect all item images in document order ──
-  // Mercari item cards contain product images in img tags.
-  // Filter out tiny/decorative images (icons, avatars) by min size.
-  const allImgs = Array.from(document.querySelectorAll('img')).filter(img => {
-    const src = img.src || '';
-    // Skip data URIs, blank sources, and very small images (icons/avatars)
-    if (src.startsWith('data:') || src === '' || src === window.location.href) return false;
-    const w = img.naturalWidth || img.width || 0;
-    const h = img.naturalHeight || img.height || 0;
-    // Product images are typically at least 100px in both dimensions
-    return w >= 100 && h >= 100;
-  }).map(img => img.src);
-  const images = [...new Set(allImgs)]; // deduplicate
+  // Mercari uses various image loading strategies:
+  // 1. Direct <img src="..."> with cdn-*.mercari.com URLs
+  // 2. Lazy-loaded with data-src or data-lazy-src
+  // 3. Inside <picture>/<source> tags
+  // Filter: only keep cdn-*.mercari.com or cdn-*.mercariassets.com product images
+  const allImgs = Array.from(document.querySelectorAll('img')).flatMap(img => {
+    const candidates = [
+      img.src,
+      img.getAttribute('data-src') || '',
+      img.getAttribute('data-lazy-src') || '',
+      img.getAttribute('data-original') || '',
+    ].filter(s => s && !s.startsWith('data:') && s !== window.location.href);
+    return candidates;
+  });
+  // Also check for background-image style on item cards
+  const bgImgs = Array.from(document.querySelectorAll('[style*="background-image"]'))
+    .map(el => {
+      const bg = el.style.backgroundImage || '';
+      const match = bg.match(/url\(['"]?([^'")]+)['"]?\)/);
+      return match ? match[1] : '';
+    }).filter(s => s);
+  const images = [...new Set([...allImgs, ...bgImgs])].filter(s => s);
   console.log(`🖼️ 見つかった画像: ${images.length} 件`);
   if (images.length > 0) console.log(`  例: ${images[0]}`);
 
