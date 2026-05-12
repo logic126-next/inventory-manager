@@ -946,6 +946,9 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
             price = item.price
             status_text = item.status or ""
             source_url = item.url
+            # Normalize: /sell/inventory/ → /inventory/
+            if source_url:
+                source_url = source_url.replace('/sell/inventory/', '/inventory/')
 
             # Determine inventory status
             if "出品中" in status_text:
