@@ -161,7 +161,7 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>商品</th><th>状態</th><th>購入額</th><th>売価</th><th>利益</th><th></th></tr></thead>
+      <thead><tr><th>商品</th><th>状態</th><th>購入額</th><th>売価</th><th>利益</th><th>リンク</th><th></th></tr></thead>
       <tbody id="inv-table"></tbody>
     </table>
   </div>
@@ -534,12 +534,14 @@ async function loadInventory() {
       tbody.innerHTML = data.items.map(item => {
         const sale = item.sale || {};
         const profit = sale.net_profit != null ? (sale.net_profit >= 0 ? `+${yen(sale.net_profit)}` : yen(sale.net_profit)) : '—';
+        const linkCol = item.source_url ? `<a href="${escHtml(item.source_url)}" target="_blank" style="color:var(--accent);font-size:12px">↗</a>` : '';
         return `<tr>
-          <td style="cursor:pointer;color:var(--blue)" onclick="showItemDetail(${item.id})">${item.name}</td>
+          <td style="cursor:pointer;color:var(--blue)" onclick="showItemDetail(${item.id})">${escHtml(item.name)}</td>
           <td><span class="badge badge-${item.status}">${item.status}</span></td>
           <td>${yen(item.purchase_price)}</td>
           <td>${sale.sale_price ? yen(sale.sale_price) : '—'}</td>
           <td>${profit}</td>
+          <td style="text-align:center">${linkCol}</td>
           <td><button class="btn btn-sm" onclick="showItemDetail(${item.id})">詳細</button></td>
         </tr>`;
       }).join('');
