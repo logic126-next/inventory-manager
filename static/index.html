@@ -260,118 +260,59 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   </div>
   
   <!-- Hidden helper: inject this script on Mercari page -->
- <script id="sync-json-helper-script" type="text/template">
+<script id="sync-json-helper-script" type="text/template">
 (function() {
   const items = [];
 
   console.log('=== Mercari 持ち物一覧 解析開始 ===');
   console.log('URL:', window.location.href);
-  console.log('Title:', document.title);
 
   const bodyText = document.body.innerText;
   const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l);
-  console.log(`Total lines: ${lines.length}`);
 
-  // ── Skip words for navigation/menu ──
-  const skipWords = ['コンテンツにスキップ', 'リンク生成', 'シェア', '商品管理', 'いいね',
-    '閲覧履歴', 'フォローリスト', '出品した商品', '購入した商品', 'マイページ',
-    'プロフィール', '設定', 'ヘルプ', 'ガイド', '利用規約', 'プライバシー',
-    'ログイン', 'メルカリShops', 'コンテンツ', 'カテゴリ', 'ブランド', '状態',
-    '画像', 'ボタン付き画像', '出品', '購入', 'クーポン', 'キャンペーン',
-    'ポイント', '招待', '残高', '支払い', '規約', 'ポリシー', 'サービス',
-    '件中', '件の表示', 'Next', 'Previous', '次へ', '前へ'];
+  // ── Extract items using the 4-line pattern ──
+  // Pattern: name → "¥" → price_number → status
+  for (let i = 0; i < lines.length - 3; i++) {
+    // Check if line i+1 is exactly "¥"
+    if (lines[i + 1] === '¥') {
+      const name = lines[i].trim();
+      const priceStr = lines[i + 2].trim();
+      const status = lines[i + 3].trim();
 
-  // ── Extract items ──
-  // Pattern: item name line(s), then a line that's just a price (digits + commas)
-  // Prices may or may not have ¥ symbol
-  const pricePattern = /[\￥¥]?\s*([\d,]{2,})$/;
+      // Parse price (remove commas)
+      const price = parseInt(priceStr.replace(/,/g, ''));
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Skip navigation lines
-    if (skipWords.some(w => line.includes(w))) continue;
-
-    // Check if this line contains a price (with or without ¥)
-    const priceMatch = line.match(pricePattern);
-    if (!priceMatch) continue;
-
-    const price = parseInt(priceMatch[1].replace(/,/g, ''));
-
-    // Filter: reasonable price range for Mercari items
-    if (price < 100 || price > 5000000) continue;
-
-    // Additional check: if the line is JUST a number (or ¥number), it's more likely a price
-    const isJustPrice = /^[\￥¥]?\s*[\d,]+$/.test(line);
-    if (!isJustPrice && price < 1000) continue; // Extra filter for non-pure price lines
-
-    // Look backwards for item name (up to 5 lines)
-    let name = '';
-    for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
-      const prevLine = lines[j];
-      // Stop conditions
-      if (prevLine.match(/[\￥¥]?\s*[\d,]+$/)) break; // Another price
-      if (skipWords.some(w => prevLine.includes(w))) break;
-      if (prevLine.length < 2 || prevLine.length > 200) break;
-      // Skip lines that are just numbers or single chars
-      if (/^\d+$/.test(prevLine)) break;
-      name = prevLine + ' ' + name;
-    }
-    name = name.trim();
-
-    // Skip if name is too short or looks like navigation
-    if (name.length < 3) continue;
-    if (skipWords.some(w => name.includes(w))) continue;
-
-    // Look forward for status (up to 5 lines)
-    let status = '出品する';
-    for (let j = i + 1; j <= Math.min(lines.length - 1, i + 5); j++) {
-      const nextLine = lines[j];
-      if (nextLine.includes('出品する') || nextLine.includes('出品中')) {
-        status = nextLine.includes('出品中') ? '出品中' : '出品する';
-        break;
+      // Validate
+      if (name.length >= 2 && price > 0 && status) {
+        items.push({ name, price, status });
+        i += 3; // Skip the next 3 lines (¥, price, status)
       }
-    }
-
-    items.push({ name, price, status });
-    console.log(`  ✓ ${name} - ¥${price.toLocaleString()} (${status})`);
-  }
-
-  // ── Deduplicate by name ──
-  const seen = new Set();
-  const uniqueItems = [];
-  for (const item of items) {
-    if (!seen.has(item.name)) {
-      seen.add(item.name);
-      uniqueItems.push(item);
     }
   }
 
   // ── Output results ──
-  console.log(`\n=== 結果: ${uniqueItems.length} 件 (${items.length - uniqueItems.length} 件重複) ===`);
-  if (uniqueItems.length > 0) {
-    console.table(uniqueItems.slice(0, 10).map(i => ({ 名前: i.name, 価格: '¥' + i.price.toLocaleString(), 状態: i.status })));
-    if (uniqueItems.length > 10) console.log(`... 他 ${uniqueItems.length - 10} 件`);
+  console.log(`=== 結果: ${items.length} 件 ===`);
+  if (items.length > 0) {
+    console.table(items.slice(0, 10).map(i => ({ 名前: i.name, 価格: '¥' + i.price.toLocaleString(), 状態: i.status })));
+    if (items.length > 10) console.log(`... 他 ${items.length - 10} 件`);
   } else {
     console.warn('⚠️ 商品が見つかりませんでした');
+    console.log('💡 持ち物一覧ページを開いてください: https://jp.mercari.com/mypage/inventory');
   }
 
-  // Use unique items for sync/download
-  const finalItems = uniqueItems;
-
   // ── Auto-push to Inventory Manager API ──
-  if (finalItems.length > 0) {
+  if (items.length > 0) {
     console.log('📡 Inventory Manager に同期中...');
     fetch('http://192.168.1.203:8000/api/scrapers/mercari/owned/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       mode: 'no-cors',
-      body: JSON.stringify({ items: finalItems })
+      body: JSON.stringify({ items })
     }).then(() => console.log('✅ Synced to Inventory Manager!'));
   }
 
   // ── Auto-download JSON file ──
-  const blob = new Blob([JSON.stringify({ items: finalItems }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ items }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = 'mercari_owned_items.json'; a.click();
