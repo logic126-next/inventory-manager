@@ -116,8 +116,11 @@ def row_to_dict(row) -> dict:
 
 
 def generate_sku() -> str:
+    import random
     now = datetime.now()
-    return f"INV-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+    ts = now.strftime('%Y%m%d%H%M%S')
+    rand = random.randint(1000, 9999)
+    return f"INV-{ts}-{rand}"
 
 
 def dict_to_json(obj: Any) -> str:
