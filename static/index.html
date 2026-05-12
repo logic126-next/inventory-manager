@@ -421,6 +421,7 @@ async function api(path, opts = {}) {
 }
 
 // ── Format ───────────────────────────────────────
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function yen(n) { return n != null ? '¥' + Number(n).toLocaleString() : '—'; }
 function fmtDate(d) { return d ? d.split('T')[0].split('-').slice(1).join('/') : ''; }
 function timeAgo(ts) {
@@ -966,6 +967,7 @@ async function loadSyncItems() {
       </div>`;
     }).join('');
   } catch(e) {
+    console.error('loadSyncItems error:', e);
     document.getElementById('sync-items-count').textContent = '読み込みエラー';
   }
 }
