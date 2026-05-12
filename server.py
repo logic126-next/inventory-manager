@@ -116,11 +116,8 @@ def row_to_dict(row) -> dict:
 
 
 def generate_sku() -> str:
-    import random
-    now = datetime.now()
-    ts = now.strftime('%Y%m%d%H%M%S')
-    rand = random.randint(1000, 9999)
-    return f"INV-{ts}-{rand}"
+    import uuid
+    return f"INV-{uuid.uuid4().hex[:12].upper()}"
 
 
 def dict_to_json(obj: Any) -> str:
