@@ -270,23 +270,20 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
 
  // ── Collect all item links in document order ──
   // Mercari inventory page uses href like /inventory/m24943521920
+  // Filter to ONLY /inventory/m{digits} to avoid duplicates with /sell/inventory/
   const allLinks = Array.from(document.querySelectorAll('a')).filter(a => {
     const href = a.getAttribute('href') || a.href || '';
-    return href.includes('/inventory/') || href.includes('/items/') || href.includes('/item/');
+    return href.match(/\/inventory\/m\d+/);
   }).map(a => a.href);
   const links = [...new Set(allLinks)]; // deduplicate
   console.log(`🔗 見つかったリンク: ${links.length} 件`);
   if (links.length > 0) console.log(`  例: ${links[0]}`);
   if (links.length === 0) {
-    console.warn('⚠️ /items/ リンクが見つかりません – 正しいページですか？');
+    console.warn('⚠️ /inventory/m リンクが見つかりません – 正しいページですか？');
   }
 
   // ── Collect all item images in document order ──
-  // Mercari uses various image loading strategies:
-  // 1. Direct <img src="..."> with cdn-*.mercari.com URLs
-  // 2. Lazy-loaded with data-src or data-lazy-src
-  // 3. Inside <picture>/<source> tags
-  // Filter: only keep cdn-*.mercari.com or cdn-*.mercariassets.com product images
+  // Only keep product photos: /photos/m{digits} pattern
   const allImgs = Array.from(document.querySelectorAll('img')).flatMap(img => {
     const candidates = [
       img.src,
@@ -296,14 +293,8 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     ].filter(s => s && !s.startsWith('data:') && s !== window.location.href);
     return candidates;
   });
-  // Also check for background-image style on item cards
-  const bgImgs = Array.from(document.querySelectorAll('[style*="background-image"]'))
-    .map(el => {
-      const bg = el.style.backgroundImage || '';
-      const match = bg.match(/url\(['"]?([^'")]+)['"]?\)/);
-      return match ? match[1] : '';
-    }).filter(s => s);
-  const images = [...new Set([...allImgs, ...bgImgs])].filter(s => s);
+  // Filter to only product photos (not avatars, icons, etc.)
+  const images = [...new Set(allImgs)].filter(s => s.match(/\/photos\/m\d+/));
   console.log(`🖼️ 見つかった画像: ${images.length} 件`);
   if (images.length > 0) console.log(`  例: ${images[0]}`);
 
@@ -327,7 +318,7 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
       // ── Assign URL by index order ──
       let url = null;
       if (linkIdx < links.length) {
-        url = links[linkIdx];
+        url = links[linkIdx].replace('/sell/inventory/', '/inventory/');
       }
 
       // ── Assign image by index order ──
