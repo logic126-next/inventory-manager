@@ -135,6 +135,7 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   <div class="tab" data-page="inventory">📦 在庫</div>
   <div class="tab" data-page="discovery">🔍 発見</div>
   <div class="tab" data-page="profit">💰 利益</div>
+  <div class="tab" data-page="sync">🔄 同期</div>
 </div>
 
 <!-- ════════ Dashboard ════════ -->
@@ -214,6 +215,98 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
       <button class="btn btn-sm" id="disc-next" onclick="discLoadPage(1)" style="display:none">次へ →</button>
     </div>
   </div>
+</div>
+
+<!-- ════════ Sync ════════ -->
+<div id="page-sync" class="page">
+  <div class="card">
+    <h3 style="margin-bottom:8px">🔄 Mercari 持ち物同期</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Mercari の「持ち物一覧」ページから商品データを取得して在庫に同期します。</p>
+    
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="startMercariSync()" id="btn-sync-start">📥 同期開始</button>
+        <button class="btn" onclick="openJsonUpload()" id="btn-sync-upload">📂 JSON ファイルをアップロード</button>
+        <input type="file" id="sync-file-input" accept=".json" style="display:none" onchange="handleJsonUpload(event)">
+      </div>
+      
+      <div id="sync-status" style="display:none">
+        <div class="stat-grid" id="sync-stats"></div>
+        <div id="sync-progress" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="card" style="margin-top:12px">
+    <div class="card-title">操作方法</div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.8">
+      <strong style="color:var(--text)">方法1: JSON ファイル</strong><br>
+      1. Chrome で <a href="https://jp.mercari.com/mypage/inventory" target="_blank">持ち物一覧</a> を開く<br>
+      2. F12 → Console で以下のスクリプトを実行：<br>
+      <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:11px">document.getElementById('sync-json-helper').click()</code><br>
+      3. 自動で <code>mercari_owned_items.json</code> がダウンロードされるので「📂 JSON ファイルをアップロード」で選択<br><br>
+      <strong style="color:var(--text)">方法2: ページ内スクリプト</strong><br>
+      1. 同じく Chrome で <a href="https://jp.mercari.com/mypage/inventory" target="_blank">持ち物一覧</a> を開く<br>
+      2. 上記の helper スクリプトを Console で実行すると、このページに直接同期されます
+    </div>
+  </div>
+  
+  <div class="card" style="margin-top:12px">
+    <div class="card-title">同期済み商品</div>
+    <div id="sync-items-count" style="font-size:13px;color:var(--text2)">読み込み中...</div>
+    <div style="margin-top:8px">
+      <button class="btn btn-sm" onclick="loadSyncItems()">🔄 更新</button>
+    </div>
+  </div>
+  
+  <!-- Hidden helper: inject this script on Mercari page -->
+  <script id="sync-json-helper-script" type="text/template">
+(function() {
+  const items = [];
+  const bodyText = document.body.innerText;
+  const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const priceMatch = line.match(/¥([\d,]+)/);
+    if (priceMatch) {
+      const price = parseInt(priceMatch[1].replace(/,/g, ''));
+      let name = '';
+      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+        const prevLine = lines[j];
+        if (prevLine.includes('出品する') || prevLine.includes('出品中') || prevLine.includes('¥')) break;
+        name = prevLine + ' ' + name;
+      }
+      name = name.trim();
+      if (name.length < 3) continue;
+      if (name.includes('出品') || name.includes('購入') || name.includes('設定') || name.includes('ヘルプ') || name.includes('ガイド') || name.includes('利用規約') || name.includes('プライバシー') || name.includes('メルカリShops') || name.includes('コンテンツ') || name.includes('シェア') || name.includes('リンク')) continue;
+      let statusText = '';
+      for (let j = i + 1; j <= Math.min(lines.length - 1, i + 3); j++) {
+        const nextLine = lines[j];
+        if (nextLine.includes('出品する') || nextLine.includes('出品中') || nextLine.includes('出品済み')) { statusText = nextLine; break; }
+      }
+      items.push({ name: name, price: price, status: statusText || '出品する' });
+    }
+  }
+  console.log('Found', items.length, 'items');
+  console.log(JSON.stringify({ items: items }, null, 2));
+  // Also try to send to Inventory Manager via fetch
+  try {
+    fetch('http://192.168.1.203:8000/api/scrapers/mercari/owned/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      mode: 'no-cors',
+      body: JSON.stringify({ items: items })
+    }).then(() => console.log('✅ Synced to Inventory Manager!'));
+  } catch(e) { console.error(e); }
+  // Download as JSON
+  const blob = new Blob([JSON.stringify({ items: items }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'mercari_owned_items.json'; a.click();
+  URL.revokeObjectURL(url);
+  console.log('Downloaded as mercari_owned_items.json');
+})();
+  </script>
 </div>
 
 <!-- ════════ Add Item Modal ════════ -->
@@ -301,6 +394,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.page === 'dashboard') loadDashboard();
     if (tab.dataset.page === 'inventory') loadInventory();
     if (tab.dataset.page === 'profit') loadProfit();
+    if (tab.dataset.page === 'sync') loadSyncItems();
   });
 });
 
@@ -640,6 +734,7 @@ async function loadProfit() {
 // ── Init ─────────────────────────────────────────
 loadDashboard();
 initInventory();
+loadSyncItems();
 
 // ══════════════════════════════════════════════════
 // DISCOVERY (Scraper Integration)
@@ -792,6 +887,101 @@ document.getElementById('disc-search').addEventListener('input', () => {
 });
 document.getElementById('disc-price-min').addEventListener('change', () => { discPage = 1; loadDiscoveryItems(); });
 document.getElementById('disc-price-max').addEventListener('change', () => { discPage = 1; loadDiscoveryItems(); });
+
+// ══════════════════════════════════════════════════
+// SYNC (Mercari 持ち物)
+// ══════════════════════════════════════════════════
+async function loadSyncItems() {
+  try {
+    const data = await api('/api/items?platform=mercari_owned&per_page=1');
+    const total = data.total;
+    document.getElementById('sync-items-count').textContent = `Mercari 持ち物から同期済み: ${total} 件`;
+  } catch(e) {
+    document.getElementById('sync-items-count').textContent = '読み込みエラー';
+  }
+}
+
+function openJsonUpload() {
+  document.getElementById('sync-file-input').click();
+}
+
+async function handleJsonUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const statusDiv = document.getElementById('sync-status');
+  statusDiv.style.display = 'block';
+  document.getElementById('sync-progress').innerHTML = '<div style="color:var(--blue);font-size:13px">📂 ファイルを読み込み中...</div>';
+  
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const items = data.items || [];
+    
+    if (items.length === 0) {
+      document.getElementById('sync-progress').innerHTML = '<div style="color:var(--red)">商品データが見つかりません</div>';
+      return;
+    }
+    
+    document.getElementById('sync-progress').innerHTML = `<div style="color:var(--blue);font-size:13px">📥 ${items.length} 件の商品を同期中...</div>`;
+    
+    const result = await api('/api/scrapers/mercari/owned/sync', {
+      method: 'POST',
+      body: JSON.stringify({ items: items }),
+    });
+    
+    document.getElementById('sync-stats').innerHTML = `
+      <div class="stat-card green"><span class="num">${result.created}</span><span class="label">新規追加</span></div>
+      <div class="stat-card blue"><span class="num">${result.updated}</span><span class="label">状態更新</span></div>
+      <div class="stat-card yellow"><span class="num">${result.skipped}</span><span class="label">スキップ</span></div>
+      <div class="stat-card purple"><span class="num">${result.total}</span><span class="label">合計</span></div>
+    `;
+    document.getElementById('sync-progress').innerHTML = '<div style="color:var(--green);font-size:13px">✅ 同期完了!</div>';
+    loadSyncItems();
+  } catch(e) {
+    document.getElementById('sync-progress').innerHTML = `<div style="color:var(--red)">エラー: ${e.message}</div>`;
+  }
+  
+  // Reset file input
+  event.target.value = '';
+}
+
+async function startMercariSync() {
+  const statusDiv = document.getElementById('sync-status');
+  statusDiv.style.display = 'block';
+  document.getElementById('sync-progress').innerHTML = '<div style="color:var(--yellow);font-size:13px">💡 Chrome で Mercari 持ち物一覧を開き、Console に以下のスクリプトを貼り付けて実行してください：</div>';
+  
+  const scriptEl = document.getElementById('sync-json-helper-script');
+  const scriptContent = scriptEl.textContent.trim();
+  
+  document.getElementById('sync-progress').innerHTML += `
+    <div style="margin-top:8px">
+      <textarea readonly onclick="this.select()" style="width:100%;min-height:120px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;padding:8px;font-family:monospace;resize:vertical">${scriptContent}</textarea>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="copySyncScript()">📋 コピー</button>
+        <button class="btn btn-sm btn-primary" onclick="loadSyncItems()">🔄 結果を確認</button>
+      </div>
+      <p style="font-size:11px;color:var(--text2);margin-top:8px">上記のスクリプトをコピーして、Mercari 持ち物一覧の Chrome Console で実行してください</p>
+    </div>
+  `;
+}
+
+function copySyncScript() {
+  const scriptEl = document.getElementById('sync-json-helper-script');
+  const text = scriptEl.textContent.trim();
+  navigator.clipboard.writeText(text).then(() => {
+    alert('✅ スクリプトをクリップボードにコピーしました');
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('✅ スクリプトをクリップボードにコピーしました');
+  });
+}
 </script>
 </body>
 </html>
