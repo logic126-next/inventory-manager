@@ -268,15 +268,30 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   console.log('=== Mercari 持ち物一覧 解析開始 ===');
   console.log('URL:', window.location.href);
 
-  // ── Build a map of item name → URL from DOM links ──
+  // ── Normalize text for fuzzy matching ──
+  function normalizeText(text) {
+    return text
+      .replace(/[\s\u3000]+/g, ' ')   // collapse all whitespace (full-width too)
+      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]|[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '')  // strip emoji
+      .trim()
+      .toLowerCase();
+  }
+
+  // ── Build link map: normalized text → href ──
   const linkMap = new Map();
+  const linkTexts = [];
   document.querySelectorAll('a[href*="/items/"]').forEach(a => {
     const text = a.innerText.trim();
     if (text.length >= 2) {
-      linkMap.set(text, a.href);
+      const key = normalizeText(text);
+      linkMap.set(key, a.href);
+      linkTexts.push(text);
     }
   });
   console.log(`🔗 見つかったリンク: ${linkMap.size} 件`);
+  if (linkMap.size === 0) {
+    console.warn('⚠️ /items/ リンクが見つかりません – 正しいページですか？');
+  }
 
   const bodyText = document.body.innerText;
   const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l);
@@ -293,8 +308,19 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
       // Parse price (remove commas)
       const price = parseInt(priceStr.replace(/,/g, ''));
 
-      // Look up URL from DOM link map
-      const url = linkMap.get(name) || null;
+      // ── Fuzzy URL lookup ──
+      const normName = normalizeText(name);
+      let url = linkMap.get(normName) || null;
+
+      // If no exact normalized match, try substring match
+      if (!url) {
+        for (const [key, href] of linkMap.entries()) {
+          if (key.includes(normName) || normName.includes(key)) {
+            url = href;
+            break;
+          }
+        }
+      }
 
       // Validate
       if (name.length >= 2 && price > 0 && status) {
@@ -304,14 +330,33 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     }
   }
 
+  // ── Debug: URL match stats ──
+  const urlCount = items.filter(i => i.url).length;
+  const noUrlCount = items.length - urlCount;
+  console.log(`=== 結果: ${items.length} 件 (URLあり: ${urlCount}, URLなし: ${noUrlCount}) ===`);
+
+  if (noUrlCount > 0) {
+    console.warn(`⚠️ ${noUrlCount} 件の商品にURLが付きませんでした`);
+    if (noUrlCount === items.length && linkMap.size > 0) {
+      console.warn('💡 全てのURLが一致失敗 – 名前フォーマットが異なる可能性があります');
+      console.log('   見つかったリンク名 (例):', linkTexts.slice(0, 5));
+      console.log('   抽出された商品名 (例):', items.slice(0, 5).map(i => i.name));
+    }
+  }
+
+  if (linkMap.size === 0 && items.length > 0) {
+    console.warn('⚠️ 商品は見つかったが、リンクが取得できませんでした');
+    console.warn('💡 Mercariの持ち物一覧ページ ( /mypage/inventory ) で再試行してください');
+  }
+
   // ── Output results ──
-  console.log(`=== 結果: ${items.length} 件 ===`);
   if (items.length > 0) {
-    console.table(items.slice(0, 10).map(i => ({ 名前: i.name, 価格: '¥' + i.price.toLocaleString(), 状態: i.status })));
+    console.table(items.slice(0, 10).map(i => ({ 名前: i.name, 価格: '¥' + i.price.toLocaleString(), 状態: i.status, URL: i.url || 'なし' })));
     if (items.length > 10) console.log(`... 他 ${items.length - 10} 件`);
   } else {
     console.warn('⚠️ 商品が見つかりませんでした');
     console.log('💡 持ち物一覧ページを開いてください: https://jp.mercari.com/mypage/inventory');
+    console.log('💡 URLが /mypage/inventory で始まることを確認してください');
   }
 
   // ── Auto-push to Inventory Manager API ──
