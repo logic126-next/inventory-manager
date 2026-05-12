@@ -262,72 +262,170 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
 (function() {
   const items = [];
 
-  // Method 1: Try DOM-based extraction
-  const itemCards = document.querySelectorAll('[class*="ItemCard"], [class*="GridItem"], [class*="item-card"], a[href*="/items/"]');
+  // ── Diagnostic: log what we find ──
+  console.log('=== Mercari 持ち物一覧 解析開始 ===');
+  console.log('Page title:', document.title);
 
-  if (itemCards.length > 0) {
-    itemCards.forEach(card => {
+  // ── Method 1: Look for item links with /items/ pattern ──
+  // Mercari owned items page has links like /items/1234567890
+  const allLinks = document.querySelectorAll('a[href*="/items/"]');
+  console.log(`Found ${allLinks.length} links with /items/`);
+
+  // Filter to actual item links (not nav/sidebar)
+  const itemLinks = Array.from(allLinks).filter(a => {
+    const href = a.getAttribute('href') || '';
+    // Must be /items/{number} pattern
+    return /^\/items\/\d+$/.test(href);
+  });
+  console.log(`Filtered to ${itemLinks.length} item links`);
+
+  if (itemLinks.length > 0) {
+    const seen = new Set();
+    itemLinks.forEach(link => {
       try {
-        const link = card.querySelector('a[href*="/items/"]') || card;
-        const nameEl = card.querySelector('[class*="title"], [class*="name"], [class*="item-name"]') || link;
-        const priceEl = card.querySelector('[class*="price"], [class*="Price"]') || card;
-        const name = (nameEl?.textContent || '').trim();
-        const priceText = (priceEl?.textContent || '').trim();
-        const priceMatch = priceText.match(/¥([\d,]+)/);
+        const href = link.getAttribute('href');
+        // Find the parent card/container
+        let card = link.closest('[class*="item"], [class*="Item"], [class*="card"], [class*="Card"], article, [role="article"]') || link.parentElement;
 
-        if (name && name.length > 3 && priceMatch) {
-          const price = parseInt(priceMatch[1].replace(/,/g, ''));
-          let status = '出品する';
-          const btn = card.querySelector('button, [class*="action"], [class*="status"]');
-          if (btn) {
-            const btnText = btn.textContent.trim();
-            if (btnText.includes('出品')) status = btnText;
+        // Extract name - try various approaches
+        let name = '';
+        // Try data attributes first (React apps often put data here)
+        const dataTitle = link.closest('[data-title]')?.getAttribute('data-title');
+        if (dataTitle) name = dataTitle;
+
+        // Try child text
+        if (!name) {
+          // The link itself might contain the name
+          const linkText = link.textContent.trim();
+          if (linkText.length > 3 && !linkText.includes('出品') && !linkText.includes('購入')) {
+            name = linkText;
           }
+        }
+
+        // Try sibling elements
+        if (!name && card) {
+          const titleEl = card.querySelector('[class*="title"], [class*="Title"], [class*="name"], [class*="Name"]');
+          if (titleEl) name = titleEl.textContent.trim();
+        }
+
+        // Extract price - try multiple patterns
+        let price = 0;
+        const pricePatterns = [/￥?([\d,]+)/, /(\d+)\s*円/];
+        let priceText = '';
+
+        if (card) {
+          // Try to find price in the card
+          const cardText = card.textContent;
+          for (const pattern of pricePatterns) {
+            const match = cardText.match(pattern);
+            if (match) {
+              priceText = match[1];
+              price = parseInt(priceText.replace(/,/g, ''));
+              break;
+            }
+          }
+        }
+
+        // If no price found in card, look at nearby elements
+        if (!price) {
+          const parentText = (link.parentElement?.textContent || '');
+          for (const pattern of pricePatterns) {
+            const match = parentText.match(pattern);
+            if (match) {
+              price = parseInt(match[1].replace(/,/g, ''));
+              break;
+            }
+          }
+        }
+
+        // Extract status
+        let status = '出品する';
+        if (card) {
+          const cardText = card.textContent;
+          if (cardText.includes('出品中')) status = '出品中';
+          else if (cardText.includes('出品する')) status = '出品する';
+          else if (cardText.includes('出品済み')) status = '出品済み';
+        }
+
+        // Validate and add
+        if (name && name.length > 3 && price > 0 && !seen.has(name)) {
+          seen.add(name);
           items.push({ name, price, status });
         }
-      } catch(e) {}
+      } catch(e) {
+        console.warn('Error processing link:', e);
+      }
     });
   }
 
-  // Method 2: Fallback to innerText if DOM extraction found nothing
+  // ── Method 2: Fallback - parse entire page text ──
   if (items.length === 0) {
-    const bodyText = document.body.innerText;
+    console.log('Fallback: parsing page text...');
+    const bodyText = document.body.innerText || document.body.textContent;
     const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l);
     const seen = new Set();
+
+    // Mercari uses both ¥ and ￥ for yen sign
+    const yenPattern = /[￥¥]([\d,]+)/;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const priceMatch = line.match(/¥([\d,]+)/);
+      const priceMatch = line.match(yenPattern);
       if (priceMatch) {
         const price = parseInt(priceMatch[1].replace(/,/g, ''));
+        if (price < 10 || price > 1000000) continue; // Filter out unreasonable prices
+
+        // Look backwards for item name
         let name = '';
-        for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+        for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
           const prevLine = lines[j];
-          if (prevLine.includes('出品する') || prevLine.includes('出品中') || prevLine.includes('¥')) break;
+          // Stop at price lines, buttons, or navigation
+          if (prevLine.match(/[￥¥]/) || prevLine.includes('出品') || prevLine.includes('購入') ||
+              prevLine.includes('設定') || prevLine.includes('ヘルプ') || prevLine.includes('ガイド') ||
+              prevLine.includes('利用規約') || prevLine.includes('プライバシー') || prevLine.includes('ログイン') ||
+              prevLine.includes('マイページ') || prevLine.includes('プロフィール') || prevLine.includes('メルカリShops') ||
+              prevLine.includes('コンテンツ') || prevLine.includes('シェア') || prevLine.includes('リンク') ||
+              prevLine.includes('カテゴリ') || prevLine.includes('ブランド') || prevLine.includes('状態')) break;
           name = prevLine + ' ' + name;
         }
         name = name.trim();
+
         if (name.length < 3 || seen.has(name)) continue;
         seen.add(name);
-        const skipWords = ['出品', '購入', '設定', 'ヘルプ', 'ガイド', '利用規約', 'プライバシー', 'メルカリShops', 'コンテンツ', 'シェア', 'リンク', 'ログイン', 'マイページ', 'プロフィール'];
-        if (skipWords.some(w => name.includes(w))) continue;
-        let statusText = '出品する';
-        for (let j = i + 1; j <= Math.min(lines.length - 1, i + 3); j++) {
+
+        // Look forward for status
+        let status = '出品する';
+        for (let j = i + 1; j <= Math.min(lines.length - 1, i + 5); j++) {
           const nextLine = lines[j];
-          if (nextLine.includes('出品する') || nextLine.includes('出品中') || nextLine.includes('出品済み')) { statusText = nextLine; break; }
+          if (nextLine.includes('出品する')) { status = '出品する'; break; }
+          if (nextLine.includes('出品中')) { status = '出品中'; break; }
+          if (nextLine.includes('出品済み')) { status = '出品済み'; break; }
         }
-        items.push({ name, price, status: statusText });
+
+        items.push({ name, price, status });
       }
     }
   }
 
-  console.log(`✅ Found ${items.length} items`);
+  // ── Output results ──
+  console.log(`=== 結果: 発見 ${items.length} 件 ===`);
   if (items.length > 0) {
-    console.table(items.slice(0, 5).map(i => ({ name: i.name, price: i.price, status: i.status })));
-    if (items.length > 5) console.log(`... and ${items.length - 5} more`);
+    console.table(items.slice(0, 10).map(i => ({ 名前: i.name, 価格: i.price, 状態: i.status })));
+    if (items.length > 10) console.log(`... 他 ${items.length - 10} 件`);
+  } else {
+    console.warn('⚠️ 商品が見つかりませんでした。ページをスクロールして完全に読み込んでから再度実行してください。');
+    console.log('=== デバッグ情報 ===');
+    console.log('全リンク数:', document.querySelectorAll('a').length);
+    console.log('/items/ リンク数:', document.querySelectorAll('a[href*="/items/"]').length);
+    console.log('本文文字数:', (document.body.innerText || '').length);
+    // Show first 20 lines of body text for debugging
+    const lines = (document.body.innerText || '').split('\n').slice(0, 20);
+    console.log('本文 (最初の20行):', lines);
   }
 
-  // Auto-push to Inventory Manager API
+  // ── Auto-push to Inventory Manager API ──
   if (items.length > 0) {
+    console.log('📡 Inventory Manager に同期中...');
     fetch('http://192.168.1.203:8000/api/scrapers/mercari/owned/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -336,13 +434,14 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     }).then(() => console.log('✅ Synced to Inventory Manager!'));
   }
 
-  // Auto-download JSON file
+  // ── Auto-download JSON file ──
   const blob = new Blob([JSON.stringify({ items }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = 'mercari_owned_items.json'; a.click();
   URL.revokeObjectURL(url);
   console.log('📥 Downloaded as mercari_owned_items.json');
+
 })();
   </script>
 </div>
