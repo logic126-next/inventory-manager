@@ -254,6 +254,7 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   <div class="card" style="margin-top:12px">
     <div class="card-title">同期済み商品</div>
     <div id="sync-items-count" style="font-size:13px;color:var(--text2)">読み込み中...</div>
+    <div id="sync-items-list" style="margin-top:8px"></div>
     <div style="margin-top:8px">
       <button class="btn btn-sm" onclick="loadSyncItems()">🔄 更新</button>
     </div>
@@ -266,6 +267,16 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
 
   console.log('=== Mercari 持ち物一覧 解析開始 ===');
   console.log('URL:', window.location.href);
+
+  // ── Build a map of item name → URL from DOM links ──
+  const linkMap = new Map();
+  document.querySelectorAll('a[href*="/items/"]').forEach(a => {
+    const text = a.innerText.trim();
+    if (text.length >= 2) {
+      linkMap.set(text, a.href);
+    }
+  });
+  console.log(`🔗 見つかったリンク: ${linkMap.size} 件`);
 
   const bodyText = document.body.innerText;
   const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l);
@@ -282,9 +293,12 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
       // Parse price (remove commas)
       const price = parseInt(priceStr.replace(/,/g, ''));
 
+      // Look up URL from DOM link map
+      const url = linkMap.get(name) || null;
+
       // Validate
       if (name.length >= 2 && price > 0 && status) {
-        items.push({ name, price, status });
+        items.push({ name, price, status, url });
         i += 3; // Skip the next 3 lines (¥, price, status)
       }
     }
@@ -907,9 +921,28 @@ document.getElementById('disc-price-max').addEventListener('change', () => { dis
 // ══════════════════════════════════════════════════
 async function loadSyncItems() {
   try {
-    const data = await api('/api/items?platform=mercari_owned&per_page=1');
+    const data = await api('/api/items?platform=mercari_owned&per_page=100');
     const total = data.total;
+    const items = data.items || [];
     document.getElementById('sync-items-count').textContent = `Mercari 持ち物から同期済み: ${total} 件`;
+
+    const listEl = document.getElementById('sync-items-list');
+    if (items.length === 0) {
+      listEl.innerHTML = '<div style="font-size:13px;color:var(--text2)">まだ同期されていません</div>';
+      return;
+    }
+
+    listEl.innerHTML = items.map(item => {
+      const statusLabel = item.status === 'listed' ? '🟢 出品中' : '📦 在庫';
+      const link = item.source_url ? `<a href="${item.source_url}" target="_blank" style="color:var(--accent);font-size:12px">商品ページ ↗</a>` : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div>
+          <div>${escHtml(item.name)}</div>
+          <div style="color:var(--text2);font-size:11px">¥${Number(item.purchase_price).toLocaleString()} ${statusLabel}</div>
+        </div>
+        ${link}
+      </div>`;
+    }).join('');
   } catch(e) {
     document.getElementById('sync-items-count').textContent = '読み込みエラー';
   }

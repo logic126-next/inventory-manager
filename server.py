@@ -922,6 +922,7 @@ class MercariOwnedItem(BaseModel):
     name: str
     price: int
     status: str = ""
+    url: str | None = None
 
 
 class MercariOwnedBatch(BaseModel):
@@ -941,6 +942,7 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
             name = item.name.strip()
             price = item.price
             status_text = item.status or ""
+            source_url = item.url
 
             # Determine inventory status
             if "出品中" in status_text:
@@ -952,17 +954,33 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
 
             # Check if item already exists (by name + price + platform)
             existing = conn.execute(
-                "SELECT id, status FROM items "
+                "SELECT id, status, source_url FROM items "
                 "WHERE name = ? AND purchase_price = ? AND source_platform = 'mercari_owned'",
                 (name, price),
             ).fetchone()
 
             if existing:
-                # Update status if changed
+                # Update status and source_url if changed
+                needs_update = False
+                updates = []
                 if existing["status"] != inv_status:
+                    updates.append("status = ?")
+                    needs_update = True
+                if source_url and (not existing["source_url"] or existing["source_url"] != source_url):
+                    updates.append("source_url = ?")
+                    needs_update = True
+
+                if needs_update:
+                    updates.append("updated_at = CURRENT_TIMESTAMP")
+                    update_values = []
+                    if existing["status"] != inv_status:
+                        update_values.append(inv_status)
+                    if source_url and (not existing["source_url"] or existing["source_url"] != source_url):
+                        update_values.append(source_url)
+                    update_values.append(existing["id"])
                     conn.execute(
-                        "UPDATE items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (inv_status, existing["id"]),
+                        f"UPDATE items SET {', '.join(updates)} WHERE id = ?",
+                        update_values,
                     )
                     conn.commit()
                     updated += 1
@@ -979,7 +997,7 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
                     "purchase_price, purchase_date, image_url, source_url, location_id, status, tags) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (sku, name, "", "mercari_owned", None,
-                     price, purchase_date, None, None, None,
+                     price, purchase_date, None, source_url, None,
                      inv_status, tags_json),
                 )
 
