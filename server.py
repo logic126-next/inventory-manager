@@ -920,6 +920,7 @@ class MercariOwnedItem(BaseModel):
     price: int
     status: str = ""
     url: str | None = None
+    image_url: str | None = None
 
 
 class MercariOwnedBatch(BaseModel):
@@ -934,7 +935,7 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
     # Debug: log first item to check URL
     if batch.items:
         first = batch.items[0]
-        logger.warning(f"DEBUG sync item[0]: name={first.name}, url={getattr(first, 'url', 'MISSING_FIELD')}")
+        logger.warning(f"DEBUG sync item[0]: name={first.name}, url={getattr(first, 'url', 'MISSING')}, image_url={getattr(first, 'image_url', 'MISSING')}")
     conn = get_connection()
     try:
         created = 0
@@ -946,6 +947,7 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
             price = item.price
             status_text = item.status or ""
             source_url = item.url
+            image_url = item.image_url
             # Normalize: /sell/inventory/ → /inventory/
             if source_url:
                 source_url = source_url.replace('/sell/inventory/', '/inventory/')
@@ -960,13 +962,13 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
 
             # Check if item already exists (by name + price + platform)
             existing = conn.execute(
-                "SELECT id, status, source_url FROM items "
+                "SELECT id, status, source_url, image_url FROM items "
                 "WHERE name = ? AND purchase_price = ? AND source_platform = 'mercari_owned'",
                 (name, price),
             ).fetchone()
 
             if existing:
-                # Update status and source_url if changed
+                # Update status, source_url, and image_url if changed
                 needs_update = False
                 updates = []
                 if existing["status"] != inv_status:
@@ -974,6 +976,9 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
                     needs_update = True
                 if source_url and (not existing["source_url"] or existing["source_url"] != source_url):
                     updates.append("source_url = ?")
+                    needs_update = True
+                if image_url and (not existing["image_url"] or existing["image_url"] != image_url):
+                    updates.append("image_url = ?")
                     needs_update = True
 
                 if needs_update:
@@ -983,6 +988,8 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
                         update_values.append(inv_status)
                     if source_url and (not existing["source_url"] or existing["source_url"] != source_url):
                         update_values.append(source_url)
+                    if image_url and (not existing["image_url"] or existing["image_url"] != image_url):
+                        update_values.append(image_url)
                     update_values.append(existing["id"])
                     conn.execute(
                         f"UPDATE items SET {', '.join(updates)} WHERE id = ?",
@@ -1003,7 +1010,7 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
                     "purchase_price, purchase_date, image_url, source_url, location_id, status, tags) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (sku, name, "", "mercari_owned", None,
-                     price, purchase_date, None, source_url, None,
+                     price, purchase_date, image_url, source_url, None,
                      inv_status, tags_json),
                 )
 
