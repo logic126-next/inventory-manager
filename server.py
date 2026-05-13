@@ -927,9 +927,8 @@ class MercariOwnedBatch(BaseModel):
     items: list[MercariOwnedItem]
 
 
-@app.post("/api/scrapers/mercari/owned/sync")
-async def sync_mercari_owned(batch: MercariOwnedBatch):
-    """Batch import items from Mercari 持ち物一覧 page."""
+def _sync_mercari_owned_items(batch: MercariOwnedBatch) -> dict:
+    """Core logic for syncing Mercari owned items into inventory DB."""
     conn = get_connection()
     try:
         created = 0
@@ -1021,6 +1020,38 @@ async def sync_mercari_owned(batch: MercariOwnedBatch):
             "updated": updated,
             "skipped": skipped,
             "total": len(batch.items),
+        }
+    finally:
+        conn.close()
+
+
+@app.post("/api/scrapers/mercari/owned/sync")
+async def sync_mercari_owned(batch: MercariOwnedBatch):
+    """Batch import items from Mercari 持ち物一覧 page (internal use)."""
+    return _sync_mercari_owned_items(batch)
+
+
+@app.post("/api/scrapers/mercari/owned/push")
+async def push_mercari_owned(batch: MercariOwnedBatch, request: Request):
+    """CORS-friendly endpoint for userscript/bookmarklet push from Mercari domain.
+    Same logic as /sync but explicitly designed for cross-origin calls."""
+    return _sync_mercari_owned_items(batch)
+
+
+@app.get("/api/scrapers/mercari/owned/status")
+async def mercari_owned_sync_status():
+    """Return last sync info: total synced items, last sync time."""
+    conn = get_connection()
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM items WHERE source_platform = 'mercari_owned'"
+        ).fetchone()[0]
+        last_sync = conn.execute(
+            "SELECT MAX(updated_at) FROM items WHERE source_platform = 'mercari_owned'"
+        ).fetchone()[0]
+        return {
+            "total_synced": total,
+            "last_sync_at": last_sync,
         }
     finally:
         conn.close()
