@@ -966,43 +966,43 @@ function setupBookmarkletLink() {
   const link = document.getElementById('bookmarklet-link');
   if (!link) return;
 
-  // The API URL for the push endpoint — change this to your actual IP
-  const apiPushUrl = 'https://192.168.1.203/inventory/api/scrapers/mercari/owned/push';
+  var apiPushUrl = 'https://192.168.1.203/inventory/api/scrapers/mercari/owned/push';
 
-  const jsCode = `
-(function(){
-  var items=[];
-  var links=Array.from(document.querySelectorAll("a")).filter(function(a){var h=a.getAttribute("href")||a.href||"";return h.match(/\\/inventory\\/m\\d+/)}).map(function(a){return a.href});
-  links=[...new Set(links)];
-  var imgs=Array.from(document.querySelectorAll("img")).flatMap(function(img){return[img.src,img.getAttribute("data-src")||"",img.getAttribute("data-lazy-src")||"",img.getAttribute("data-original")||""].filter(function(s){return s&&!s.startsWith("data:")&&s!==location.href})}).filter(function(s){return s.match(/\\/photos\\/m\\d+/)});
-  imgs=[...new Set(imgs)];
-  var lines=document.body.innerText.split("\\n").map(function(l){return l.trim()}).filter(function(l){return l});
-  var li=0,ii=0;
-  for(var i=0;i<lines.length-3;i++){
-    if(lines[i+1]==="\\u00a5"){
-      var n=lines[i].trim(),p=parseInt(lines[i+2].trim().replace(/,/g,"")),s=lines[i+3].trim();
-      var u=li<links.length?links[li].replace("/sell/inventory/","/inventory/"):null;
-      var im=ii<imgs.length?imgs[ii]:null;
-      if(n.length>=2&&p>0&&s){items.push({name:n,price:p,status:s,url:u,image_url:im});li++;ii++;i+=3;}
-    }
-  }
-  if(items.length===0){alert("⚠️ 商品が見つかりませんでした。Mercari 持ち物一覧ページで実行してください。");return;}
-  var msg="📡 "+items.length+" 件の商品を同期中...";
-  alert(msg);
-  fetch("`.concat(apiPushUrl,`",{method:"POST",headers:{"Content-Type":"application/json"},mode:"cors",body:JSON.stringify({items:items})})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    var parts=[];
-    if(d.created>0)parts.push("\\u2705 "+d.created+" 件追加");
-    if(d.updated>0)parts.push("\\ud83d\\udd04 "+d.updated+" 件更新");
-    if(d.skipped>0)parts.push("\\u23ed "+d.skipped+" 件スキップ");
-    alert(parts.join("\\n")||"\\u2705 変更なし");
-  })
-  .catch(function(e){alert("❌ 同期失敗: "+e.message)});
-})();
-  `.trim();
+  // Build bookmarklet JS as plain string (no template literals to avoid nesting issues)
+  var jsCode = [
+    '(function(){',
+    'var items=[];',
+    'var links=Array.from(document.querySelectorAll("a")).filter(function(a){var h=a.getAttribute("href")||a.href||"";return h.match(/\\\\/inventory\\\\/m\\\\d+/)}).map(function(a){return a.href});',
+    'links=[...new Set(links)];',
+    'var imgs=Array.from(document.querySelectorAll("img")).flatMap(function(img){return[img.src,img.getAttribute("data-src")||"",img.getAttribute("data-lazy-src")||"",img.getAttribute("data-original")||""].filter(function(s){return s&&!s.startsWith("data:")&&s!==location.href})}).filter(function(s){return s.match(/\\\\/photos\\\\/m\\\\d+/)});',
+    'imgs=[...new Set(imgs)];',
+    'var lines=document.body.innerText.split("\\\\n").map(function(l){return l.trim()}).filter(function(l){return l});',
+    'var li=0,ii=0;',
+    'for(var i=0;i<lines.length-3;i++){',
+    'if(lines[i+1]==="\\u00a5"){',
+    'var n=lines[i].trim(),p=parseInt(lines[i+2].trim().replace(/,/g,"")),s=lines[i+3].trim();',
+    'var u=li<links.length?links[li].replace("/sell/inventory/","/inventory/"):null;',
+    'var im=ii<imgs.length?imgs[ii]:null;',
+    'if(n.length>=2&&p>0&&s){items.push({name:n,price:p,status:s,url:u,image_url:im});li++;ii++;i+=3;}',
+    '}',
+    '}',
+    'if(items.length===0){alert("\\u26a0\\ufe0f 商品が見つかりませんでした。Mercari 持ち物一覧ページで実行してください。");return;}',
+    'var msg="\\ud83d\\udce2 "+items.length+" 件の商品を同期中...";',
+    'alert(msg);',
+    'fetch("'+apiPushUrl+'",{method:"POST",headers:{"Content-Type":"application/json"},mode:"cors",body:JSON.stringify({items:items})})',
+    '.then(function(r){return r.json()})',
+    '.then(function(d){',
+    'var parts=[];',
+    'if(d.created>0)parts.push("\\u2705 "+d.created+" 件追加");',
+    'if(d.updated>0)parts.push("\\ud83d\\udd04 "+d.updated+" 件更新");',
+    'if(d.skipped>0)parts.push("\\u23ed\\ufe0f "+d.skipped+" 件スキップ");',
+    'alert(parts.join("\\n")||"\\u2705 変更なし");',
+    '})',
+    '.catch(function(e){alert("\\u274c 同期失敗: "+e.message)});',
+    '})();'
+  ].join('');
 
-  const bookmarkletHref = 'javascript:' + encodeURIComponent(jsCode);
+  var bookmarkletHref = 'javascript:' + encodeURIComponent(jsCode);
   link.href = bookmarkletHref;
 }
 
