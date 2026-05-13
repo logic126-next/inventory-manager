@@ -6,6 +6,7 @@ Reselling inventory management with profit tracking.
 
 import asyncio
 import json
+import os
 import re
 from datetime import datetime
 from typing import Any
@@ -40,7 +41,6 @@ app.add_middleware(
 )
 
 # Mount static files
-import os
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -914,7 +914,102 @@ async def import_amazon_item(asin: str):
         inv_conn.close()
 
 
-# ── Mercari Owned Items Sync ────────────────────────────
+# ── Mercari Cookie Storage ──────────────────────────────
+# Cookie is stored in .env file as MERCARI_COOKIE=...
+# This avoids storing sensitive data in the database.
+
+_ENV_FILE = Path(__file__).parent / ".env"
+
+
+def _read_env_value(key: str) -> str | None:
+    """Read a value from .env file."""
+    if not _ENV_FILE.exists():
+        return None
+    for line in _ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        if k.strip() == key:
+            return v.strip().strip("\"").strip("'")
+    return None
+
+
+def _write_env_value(key: str, value: str):
+    """Write or update a value in .env file."""
+    lines = []
+    found = False
+    if _ENV_FILE.exists():
+        for line in _ENV_FILE.read_text().splitlines():
+            line_stripped = line.strip()
+            if line_stripped.startswith("#") or "=" not in line_stripped:
+                lines.append(line)
+                continue
+            k, _, _ = line_stripped.partition("=")
+            if k.strip() == key:
+                lines.append(f"{key}={value}")
+                found = True
+            else:
+                lines.append(line)
+    if not found:
+        lines.append(f"{key}={value}")
+    _ENV_FILE.write_text("\n".join(lines) + "\n")
+
+
+def _remove_env_value(key: str):
+    """Remove a key from .env file."""
+    if not _ENV_FILE.exists():
+        return
+    lines = []
+    for line in _ENV_FILE.read_text().splitlines():
+        line_stripped = line.strip()
+        if line_stripped.startswith("#") or "=" not in line_stripped:
+            lines.append(line)
+            continue
+        k, _, _ = line_stripped.partition("=")
+        if k.strip() != key:
+            lines.append(line)
+    _ENV_FILE.write_text("\n".join(lines) + "\n")
+
+
+# ── Cookie Settings API ─────────────────────────────────
+class CookieSaveRequest(BaseModel):
+    cookie: str
+
+
+@app.post("/api/settings/mercari-cookie")
+async def save_mercari_cookie(req: CookieSaveRequest):
+    """Save Mercari cookie to .env file."""
+    cookie = req.cookie.strip()
+    if not cookie:
+        raise HTTPException(400, "Cookie が空です")
+    _write_env_value("MERCARI_COOKIE", cookie)
+    return {"status": "saved", "message": "Cookie を保存しました"}
+
+
+@app.get("/api/settings/mercari-cookie/status")
+async def get_mercari_cookie_status():
+    """Check if Mercari cookie is set."""
+    cookie = _read_env_value("MERCARI_COOKIE")
+    has_cookie = bool(cookie)
+    return {
+        "has_cookie": has_cookie,
+        "cookie_length": len(cookie) if cookie else 0,
+    }
+
+
+@app.delete("/api/settings/mercari-cookie")
+async def delete_mercari_cookie():
+    """Remove Mercari cookie from .env file."""
+    _remove_env_value("MERCARI_COOKIE")
+    return {"status": "deleted", "message": "Cookie を削除しました"}
+
+
+# ── Mercari Owned Items Sync (Playwright) ───────────────
+# Global sync state for polling
+_sync_state: dict = {"running": False, "progress": "", "result": None, "error": None}
+
+
 class MercariOwnedItem(BaseModel):
     name: str
     price: int
@@ -927,7 +1022,7 @@ class MercariOwnedBatch(BaseModel):
     items: list[MercariOwnedItem]
 
 
-def _sync_mercari_owned_items(batch: MercariOwnedBatch) -> dict:
+def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
     """Core logic for syncing Mercari owned items into inventory DB."""
     conn = get_connection()
     try:
@@ -935,7 +1030,7 @@ def _sync_mercari_owned_items(batch: MercariOwnedBatch) -> dict:
         updated = 0
         skipped = 0
 
-        for item in batch.items:
+        for item in items:
             name = item.name.strip()
             price = item.price
             status_text = item.status or ""
@@ -1019,28 +1114,175 @@ def _sync_mercari_owned_items(batch: MercariOwnedBatch) -> dict:
             "created": created,
             "updated": updated,
             "skipped": skipped,
-            "total": len(batch.items),
+            "total": len(items),
         }
     finally:
         conn.close()
 
 
+def _extract_items_from_page(page) -> list[MercariOwnedItem]:
+    """Extract items from the Mercari inventory page using Playwright."""
+    items = []
+
+    # Get all item links
+    item_links = page.query_selector_all('a[href*="/inventory/m"]')
+    links = []
+    for link in item_links:
+        href = link.get_attribute("href")
+        if href:
+            links.append(href.replace('/sell/inventory/', '/inventory/'))
+    links = list(dict.fromkeys(links))  # deduplicate preserving order
+
+    # Get all image URLs
+    all_imgs = page.query_selector_all('img')
+    images = []
+    for img in all_imgs:
+        candidates = [
+            img.get_attribute("src") or "",
+            img.get_attribute("data-src") or "",
+            img.get_attribute("data-lazy-src") or "",
+            img.get_attribute("data-original") or "",
+        ]
+        for c in candidates:
+            if c and not c.startswith("data:") and "/photos/m" in c and c not in images:
+                images.append(c)
+
+    # Get text content and parse items
+    body_text = page.inner_text("body")
+    lines = [l.strip() for l in body_text.split("\n") if l.strip()]
+
+    link_idx = 0
+    img_idx = 0
+
+    for i in range(len(lines) - 3):
+        if lines[i + 1] == "¥":
+            name = lines[i].strip()
+            price_str = lines[i + 2].strip()
+            status = lines[i + 3].strip()
+
+            try:
+                price = int(price_str.replace(",", ""))
+            except ValueError:
+                continue
+
+            url = links[link_idx] if link_idx < len(links) else None
+            image_url = images[img_idx] if img_idx < len(images) else None
+
+            if len(name) >= 2 and price > 0 and status:
+                items.append(MercariOwnedItem(
+                    name=name, price=price, status=status,
+                    url=url, image_url=image_url
+                ))
+                link_idx += 1
+                img_idx += 1
+                i += 3
+
+    return items
+
+
+def _run_playwright_sync() -> dict:
+    """Run the Playwright sync in a synchronous function (called from async task)."""
+    from playwright.sync_api import sync_playwright
+
+    cookie = _read_env_value("MERCARI_COOKIE")
+    if not cookie:
+        return {"error": "Mercari Cookie が設定されていません。まず Cookie を入力してください。"}
+
+    _sync_state["running"] = True
+    _sync_state["progress"] = "ブラウザを起動中..."
+    _sync_state["error"] = None
+    _sync_state["result"] = None
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+
+            # Parse and set cookies
+            _sync_state["progress"] = "Cookie を設定中..."
+            # Cookie can be a single string or multiple key=value pairs
+            cookie_pairs = []
+            for part in cookie.split(";"):
+                part = part.strip()
+                if "=" in part:
+                    k, _, v = part.partition("=")
+                    cookie_pairs.append({"name": k.strip(), "value": v.strip(), "domain": ".mercari.com"})
+
+            context.add_cookies(cookie_pairs)
+
+            # Navigate to inventory page
+            _sync_state["progress"] = "Mercari 持ち物一覧にアクセス中..."
+            page = context.new_page()
+            page.goto("https://jp.mercari.com/mypage/inventory", wait_until="networkidle", timeout=30000)
+
+            # Wait for content to load (SPA might need extra time)
+            _sync_state["progress"] = "ページ内容を読み込み中..."
+            page.wait_for_timeout(3000)
+
+            # Try scrolling to load more items if there's a scrollbar
+            _sync_state["progress"] = "すべての商品を読み込み中..."
+            for _ in range(5):
+                page.evaluate("window.scrollBy(0, 500)")
+                page.wait_for_timeout(800)
+
+            # Extract items
+            _sync_state["progress"] = "商品データを抽出中..."
+            items = _extract_items_from_page(page)
+            browser.close()
+
+            if not items:
+                return {"error": "商品が見つかりませんでした。Mercari 持ち物一覧ページにログインしているか確認してください。"}
+
+            _sync_state["progress"] = f"{len(items)} 件の商品が見つかりました。データベースに保存中..."
+
+            # Save to DB
+            result = _save_items_to_db(items)
+            _sync_state["result"] = result
+            return result
+
+    except Exception as e:
+        error_msg = f"同期に失敗しました: {str(e)}"
+        _sync_state["error"] = error_msg
+        return {"error": error_msg}
+    finally:
+        _sync_state["running"] = False
+
+
 @app.post("/api/scrapers/mercari/owned/sync")
-async def sync_mercari_owned(batch: MercariOwnedBatch):
-    """Batch import items from Mercari 持ち物一覧 page (internal use)."""
-    return _sync_mercari_owned_items(batch)
+async def trigger_mercari_sync():
+    """Trigger server-side Mercari owned items sync using Playwright with stored cookie."""
+    if _sync_state["running"]:
+        return {
+            "status": "running",
+            "progress": _sync_state["progress"],
+            "message": "すでに同期が実行中です",
+        }
+
+    # Run sync in background task
+    asyncio.create_task(_async_sync_wrapper())
+    return {
+        "status": "started",
+        "message": "同期を開始しました",
+    }
 
 
-@app.post("/api/scrapers/mercari/owned/push")
-async def push_mercari_owned(batch: MercariOwnedBatch, request: Request):
-    """CORS-friendly endpoint for userscript/bookmarklet push from Mercari domain.
-    Same logic as /sync but explicitly designed for cross-origin calls."""
-    return _sync_mercari_owned_items(batch)
+async def _async_sync_wrapper():
+    """Wrapper to run synchronous Playwright code in a thread pool."""
+    import concurrent.futures
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        result = await loop.run_in_executor(executor, _run_playwright_sync)
+    # Store result for polling
+    if "error" in result and result["error"]:
+        _sync_state["result"] = result
 
 
 @app.get("/api/scrapers/mercari/owned/status")
 async def mercari_owned_sync_status():
-    """Return last sync info: total synced items, last sync time."""
+    """Return sync status for polling or last sync info."""
     conn = get_connection()
     try:
         total = conn.execute(
@@ -1049,12 +1291,17 @@ async def mercari_owned_sync_status():
         last_sync = conn.execute(
             "SELECT MAX(updated_at) FROM items WHERE source_platform = 'mercari_owned'"
         ).fetchone()[0]
-        return {
-            "total_synced": total,
-            "last_sync_at": last_sync,
-        }
     finally:
         conn.close()
+
+    return {
+        "total_synced": total,
+        "last_sync_at": last_sync,
+        "sync_running": _sync_state["running"],
+        "sync_progress": _sync_state["progress"],
+        "sync_result": _sync_state.get("result"),
+        "sync_error": _sync_state.get("error"),
+    }
 
 
 # ── Frontend ────────────────────────────────────────────
