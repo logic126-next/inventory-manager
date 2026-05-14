@@ -1227,8 +1227,7 @@ def _run_playwright_sync() -> dict:
             _sync_state["progress"] = "メールアドレスを入力中..."
             # Wait for email input field (multiple possible selectors)
             page.wait_for_selector(
-                "input[type='email'], input[name='email'], input[placeholder*='メール'], input[placeholder*='email']"
-                "input[placeholder*='Email']",
+                "input[type='email'], input[name='email'], input[placeholder*='メール'], input[placeholder*='email'], input[placeholder*='Email']",
                 timeout=15000,
             )
             email_input = page.query_selector("input[type='email'], input[name='email'], input[placeholder*='メール']")
