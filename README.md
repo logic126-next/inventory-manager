@@ -20,7 +20,7 @@ Mercari / Amazon のクローラーで発見した商品をインポートした
 │   server.py (FastAPI)        │
 │   port 8080                  │
 └──────────┬──────────────────┘
-           │ SQLite (ws) / PostgreSQL (本番)
+           │ PostgreSQL (本番)
            ▼
 ┌─────────────────────────────┐
 │   db.py (データベース層)      │
@@ -32,7 +32,7 @@ Mercari / Amazon のクローラーで発見した商品をインポートした
 
 ## データベース
 
-SQLite（WSL 開発）/ PostgreSQL（Mac Mini 本番）`inventory` データベース。
+PostgreSQL `inventory` データベース（WSL 開発時は SQLite も可）。
 
 ### テーブル
 
@@ -66,19 +66,15 @@ source venv/bin/activate
 python -m uvicorn server:app --host 0.0.0.0 --port 8080
 ```
 
-### 管理スクリプト
+### Launchd 自動起動（Mac Mini 本番）
 
 ```bash
-cd ~/workspace/inventory-manager
+# 起動 / 停止
+launchctl load ~/Library/LaunchAgents/com.logic126.inventory-manager.plist
+launchctl unload ~/Library/LaunchAgents/com.logic126.inventory-manager.plist
 
-# 起動
-python manage.py start
-
-# 停止
-python manage.py stop
-
-# 再起動
-python manage.py restart
+# クイック再起動（設定変更後）
+launchctl kickstart -k gui/$(id -u)/com.logic126.inventory-manager
 ```
 
 ## Web Dashboard
@@ -93,15 +89,16 @@ python manage.py restart
 | 📦 在庫 | 商品一覧（検索・フィルタ・ソート） / 新規登録 / 状態変更 / 販売記録 |
 | 🔍 発見 | Mercari Hunter / Amazon Hunter の商品を一覧表示して在庫にインポート |
 | 💰 利益 | プラットフォーム別利益 / 月別推移グラフ |
-| 🔄 同期 | Mercari 持ち物一覧からの同期（ブラウザスクリプト / JSON アップロード） |
+| 🔄 同期 | Mercari 持ち物一覧からの同期（ブックマークレット / Cookie 方式） |
 
 ### 機能
 
 - **在庫管理**: 商品 CRUD / 状態変更 / 販売記録 / 保管場所管理
 - **利益分析**: 累計利益 / 今月利益 / 利益率 / プラットフォーム別比較 / 月別推移
 - **スクレイパー連携**: Mercari Hunter / Amazon Hunter の商品を検索・フィルタして在庫にインポート
-- **Mercari 持ち物同期**: ブラウザコンソールスクリプトまたは JSON ファイルアップロードで一括同期
+- **Mercari 持ち物同期**: ブックマークレットまたは Cookie 方式で一括同期
 - **保管場所**: 倉庫・部屋などの保管場所管理
+- **ソート機能**: 購入価格 / 販売価格 / 利益 / 登録日でソート
 
 ## API エンドポイント
 
@@ -159,10 +156,12 @@ python manage.py restart
 | GET | `/api/settings` | 設定取得 |
 | PATCH | `/api/settings` | 設定更新 |
 | GET | `/api/statuses` | 有効なステータス一覧 |
+| POST | `/api/settings/mercari-cookie` | Mercari Cookie 保存 |
+| GET | `/api/settings/mercari-cookie/status` | Mercari Cookie 状態確認 |
 
 ## 設定
 
-環境変数（または `.env`）:
+環境変数（`.env`）:
 
 ```env
 # inventory-manager 本体 DB (PostgreSQL)
@@ -185,4 +184,54 @@ AMAZON_DB_PORT=5432
 AMAZON_DB_NAME=amazon_outlet
 AMAZON_DB_USER=amazon_outlet
 AMAZON_DB_PASSWORD=<password>
+
+# Mercari 持ち物同期用 Cookie
+MERCARI_COOKIE=<raw_cookie_string>
 ```
+
+---
+
+## Mercari 持ち物同期
+
+Mercari の「持ち物一覧」ページから所有商品を Inventory Manager に一括同期する。
+
+### 方法 1: ブックマークレット（推奨）
+
+1. Inventory Manager の「🔄 同期」タブからブックマークレットを生成
+2. ブラウザのブックマークバーにドラッグ＆ドロップ
+3. Mercari の「持ち物一覧」ページでブックマークレットを実行
+4. 商品データが Inventory Manager に送信される
+
+**動作環境:** Chrome / Firefox / Safari（Mercari.jp ログイン済み）
+
+### 方法 2: Cookie 方式
+
+1. Mercari にログインしたブラウザから Cookie を取得（DevTools → Application → Cookies）
+2. Inventory Manager の「🔄 同期」タブに Cookie 文字列を貼り付けて保存
+3. 「同期を実行」ボタンをクリック
+
+### 方法 3: JSON ファイルアップロード
+
+1. ブラウザコンソールでデータをエクスポート
+2. 生成された JSON ファイルを「🔄 同期」タブにアップロード
+
+### 同期時のフィルタリング
+
+- URL に `jp.mercari.com` を含む画像のみを保持（外部画像は除外）
+- 既に登録されている商品はスキップ（重複防止）
+
+---
+
+## 既知の制限
+
+### Mercari 自動ログイン（Playwright）は使用不可
+
+reCAPTCHA により自動ログインがブロックされるため、Cookie 方式またはブックマークレットを使用。
+
+### Mercari の商品画像
+
+Mercari Hunter から取得した商品には画像 URL が含まれない場合がある。商品ページを直接クロールすることで補完可能。
+
+### 商品画像の統一サイズ
+
+Amazon Dashboard / Mercari Dashboard / Inventory Manager 全画面で商品画像を **48x48** に統一。
