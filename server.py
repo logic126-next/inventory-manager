@@ -914,8 +914,10 @@ async def import_amazon_item(asin: str):
         inv_conn.close()
 
 
-# ── Mercari Cookie Storage ──────────────────────────────
-# Cookie is stored in .env file as MERCARI_COOKIE=...
+# ── Mercari Credentials Storage ───────────────────────
+# Email and password are stored in .env file as:
+#   MERCARI_EMAIL=user@example.com
+#   MERCARI_PASSWORD=secret123
 # This avoids storing sensitive data in the database.
 
 _ENV_FILE = Path(__file__).parent / ".env"
@@ -972,37 +974,51 @@ def _remove_env_value(key: str):
     _ENV_FILE.write_text("\n".join(lines) + "\n")
 
 
-# ── Cookie Settings API ─────────────────────────────────
-class CookieSaveRequest(BaseModel):
-    cookie: str
+# ── Credentials Settings API ────────────────────────────
+class CredentialsStatusResponse(BaseModel):
+    has_email: bool
+    has_password: bool
 
 
+@app.get("/api/settings/mercari-credentials/status")
+async def get_mercari_credentials_status():
+    """Check if Mercari email and password are set in .env."""
+    email = _read_env_value("MERCARI_EMAIL")
+    password = _read_env_value("MERCARI_PASSWORD")
+    has_email = bool(email)
+    has_password = bool(password)
+    return {
+        "has_email": has_email,
+        "has_password": has_password,
+        "email_masked": email[:3] + "***" if email else "",
+    }
+
+
+# ── Legacy cookie endpoints (kept for backward compat, no-op) ──
 @app.post("/api/settings/mercari-cookie")
-async def save_mercari_cookie(req: CookieSaveRequest):
-    """Save Mercari cookie to .env file."""
-    cookie = req.cookie.strip()
-    if not cookie:
-        raise HTTPException(400, "Cookie が空です")
-    _write_env_value("MERCARI_COOKIE", cookie)
-    return {"status": "saved", "message": "Cookie を保存しました"}
+async def save_mercari_cookie_legacy():
+    """Legacy endpoint — credentials are now set via .env file."""
+    return {"status": "deprecated", "message": "Cookie 方式は非推奨です。MERCARI_EMAIL と MERCARI_PASSWORD を .env に設定してください。"}
 
 
 @app.get("/api/settings/mercari-cookie/status")
-async def get_mercari_cookie_status():
-    """Check if Mercari cookie is set."""
-    cookie = _read_env_value("MERCARI_COOKIE")
-    has_cookie = bool(cookie)
+async def get_mercari_cookie_status_legacy():
+    """Legacy endpoint — forwards to credentials check."""
+    email = _read_env_value("MERCARI_EMAIL")
+    password = _read_env_value("MERCARI_PASSWORD")
+    has_creds = bool(email and password)
     return {
-        "has_cookie": has_cookie,
-        "cookie_length": len(cookie) if cookie else 0,
+        "has_cookie": has_creds,  # Keep field name for backward compat
+        "cookie_length": 0,
+        "has_email": bool(email),
+        "has_password": bool(password),
     }
 
 
 @app.delete("/api/settings/mercari-cookie")
-async def delete_mercari_cookie():
-    """Remove Mercari cookie from .env file."""
-    _remove_env_value("MERCARI_COOKIE")
-    return {"status": "deleted", "message": "Cookie を削除しました"}
+async def delete_mercari_cookie_legacy():
+    """Legacy endpoint — no-op."""
+    return {"status": "deprecated", "message": "Cookie 方式は非推奨です。"}
 
 
 # ── Mercari Owned Items Sync (Playwright) ───────────────
@@ -1181,12 +1197,13 @@ def _extract_items_from_page(page) -> list[MercariOwnedItem]:
 
 
 def _run_playwright_sync() -> dict:
-    """Run the Playwright sync in a synchronous function (called from async task)."""
+    """Run the Playwright sync with auto-login (called from async task)."""
     from playwright.sync_api import sync_playwright
 
-    cookie = _read_env_value("MERCARI_COOKIE")
-    if not cookie:
-        return {"error": "Mercari Cookie が設定されていません。まず Cookie を入力してください。"}
+    email = _read_env_value("MERCARI_EMAIL")
+    password = _read_env_value("MERCARI_PASSWORD")
+    if not email or not password:
+        return {"error": "Mercari のメールアドレス・パスワードが設定されていません。サーバーの .env に MERCARI_EMAIL と MERCARI_PASSWORD を設定してください。"}
 
     _sync_state["running"] = True
     _sync_state["progress"] = "ブラウザを起動中..."
@@ -1200,22 +1217,64 @@ def _run_playwright_sync() -> dict:
                 viewport={"width": 1280, "height": 900},
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
-
-            # Parse and set cookies
-            _sync_state["progress"] = "Cookie を設定中..."
-            # Cookie can be a single string or multiple key=value pairs
-            cookie_pairs = []
-            for part in cookie.split(";"):
-                part = part.strip()
-                if "=" in part:
-                    k, _, v = part.partition("=")
-                    cookie_pairs.append({"name": k.strip(), "value": v.strip(), "domain": ".mercari.com"})
-
-            context.add_cookies(cookie_pairs)
-
-            # Navigate to inventory page
-            _sync_state["progress"] = "Mercari 持ち物一覧にアクセス中..."
             page = context.new_page()
+
+            # ── Step 1: Navigate to login page ──────────────────────
+            _sync_state["progress"] = "Mercari ログインページにアクセス中..."
+            page.goto("https://jp.mercari.com/login", wait_until="domcontentloaded", timeout=30000)
+
+            # ── Step 2: Enter email and click 「次へ」 ──────────────
+            _sync_state["progress"] = "メールアドレスを入力中..."
+            # Wait for email input field (multiple possible selectors)
+            page.wait_for_selector(
+                "input[type='email'], input[name='email'], input[placeholder*='メール'], input[placeholder*='email']"
+                "input[placeholder*='Email']",
+                timeout=15000,
+            )
+            email_input = page.query_selector("input[type='email'], input[name='email'], input[placeholder*='メール']")
+            if not email_input:
+                raise RuntimeError("メールアドレス入力欄が見つかりませんでした")
+            email_input.fill(email)
+
+            # Click 「次へ」(Next) button
+            _sync_state["progress"] = "「次へ」をクリック中..."
+            next_btn = page.wait_for_selector(
+                "button[type='submit'], button:has-text('次へ'), button:has-text('Next')",
+                timeout=10000,
+            )
+            next_btn.click()
+
+            # ── Step 3: Wait for password field, enter password ─────
+            _sync_state["progress"] = "パスワードを入力中..."
+            page.wait_for_selector(
+                "input[type='password'], input[name='password']",
+                timeout=15000,
+            )
+            password_input = page.query_selector("input[type='password']")
+            if not password_input:
+                raise RuntimeError("パスワード入力欄が見つかりませんでした")
+            password_input.fill(password)
+
+            # Click 「ログイン」(Login) button
+            _sync_state["progress"] = "「ログイン」をクリック中..."
+            login_btn = page.wait_for_selector(
+                "button[type='submit'], button:has-text('ログイン'), button:has-text('Login')",
+                timeout=10000,
+            )
+            login_btn.click()
+
+            # ── Step 4: Wait for login to complete ──────────────────
+            _sync_state["progress"] = "ログイン完了を待機中..."
+            # Wait for redirect away from login page
+            page.wait_for_url(
+                lambda url: "/login" not in url,
+                timeout=30000,
+            )
+            # Extra wait for SPA to fully render
+            page.wait_for_timeout(3000)
+
+            # ── Step 5: Navigate to inventory page ──────────────────
+            _sync_state["progress"] = "Mercari 持ち物一覧にアクセス中..."
             page.goto("https://jp.mercari.com/mypage/inventory", wait_until="networkidle", timeout=30000)
 
             # Wait for content to load (SPA might need extra time)
@@ -1234,7 +1293,7 @@ def _run_playwright_sync() -> dict:
             browser.close()
 
             if not items:
-                return {"error": "商品が見つかりませんでした。Mercari 持ち物一覧ページにログインしているか確認してください。"}
+                return {"error": "商品が見つかりませんでした。Mercari の持ち物一覧ページにログインしているか確認してください。"}
 
             _sync_state["progress"] = f"{len(items)} 件の商品が見つかりました。データベースに保存中..."
 
@@ -1253,7 +1312,7 @@ def _run_playwright_sync() -> dict:
 
 @app.post("/api/scrapers/mercari/owned/sync")
 async def trigger_mercari_sync():
-    """Trigger server-side Mercari owned items sync using Playwright with stored cookie."""
+    """Trigger server-side Mercari owned items sync using Playwright auto-login."""
     if _sync_state["running"]:
         return {
             "status": "running",
@@ -1275,9 +1334,8 @@ async def _async_sync_wrapper():
     loop = asyncio.get_event_loop()
     with concurrent.futures.ThreadPoolExecutor() as executor:
         result = await loop.run_in_executor(executor, _run_playwright_sync)
-    # Store result for polling
-    if "error" in result and result["error"]:
-        _sync_state["result"] = result
+    # Always store result for polling (success or error)
+    _sync_state["result"] = result
 
 
 @app.get("/api/scrapers/mercari/owned/status")

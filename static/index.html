@@ -221,27 +221,20 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
 <div id="page-sync" class="page">
   <div class="card">
     <h3 style="margin-bottom:8px">🔄 Mercari 持ち物同期</h3>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Mercari の「持ち物一覧」ページから商品データをサーバー側で自動取得して在庫に同期します。</p>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Playwright で自動ログインし、Mercari の「持ち物一覧」ページから商品データをサーバー側で取得して在庫に同期します。</p>
 
-    <!-- Cookie Input -->
+    <!-- Credentials Status -->
     <div style="margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:20px">🍪</span>
-        <strong style="color:var(--text)">Mercari Cookie 設定</strong>
+        <span style="font-size:20px">🔑</span>
+        <strong style="color:var(--text)">認証情報ステータス</strong>
       </div>
       <p style="font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.6">
-        Mercari にログインしたブラウザから Cookie をコピーして貼り付けてください。<br>
-        <strong>取得方法:</strong> Mercari を開く → F12（開発者ツール）→ Application → Cookies → <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">SID</code> と <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">SSID</code> の値をコピー<br>
-        <strong>貼り付け例:</strong> <code style="background:var(--bg3);padding:1px 4px;border-radius:3px;font-size:11px">SID=abc123; SSID=def456</code>（セミコロンで区切る）
+        サーバーの .env ファイルに <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">MERCARI_EMAIL</code> と <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">MERCARI_PASSWORD</code> が設定されている必要があります。
       </p>
-      <div class="form-group">
-        <textarea id="mercari-cookie-input" placeholder="SID=abc123...; SSID=def456..." style="min-height:60px;font-family:monospace;font-size:12px"></textarea>
+      <div id="credentials-status" style="font-size:13px;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+        <span style="color:var(--text2)">確認中...</span>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="saveMercariCookie()">💾 Cookie を保存</button>
-        <button class="btn btn-danger" onclick="deleteMercariCookie()">🗑 Cookie を削除</button>
-      </div>
-      <div id="cookie-status" style="margin-top:8px;font-size:12px;color:var(--text2)"></div>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
@@ -252,7 +245,7 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
         <span style="font-size:20px">🔄</span>
         <strong style="color:var(--text)">同期実行</strong>
       </div>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Cookie を保存したら、ボタンを押してサーバー側で Mercari から商品データを取得します。</p>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:10px">ボタンを押してサーバー側で Mercari に自動ログインし、商品データを取得します。</p>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-primary" id="btn-sync-now" onclick="triggerMercariSync()">🔄 今すぐ同期</button>
         <button class="btn" onclick="checkSyncStatus()">📊 同期状況</button>
@@ -271,7 +264,7 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
         <span style="font-size:20px">📂</span>
         <strong style="color:var(--text)">手動インポート（JSON ファイル）</strong>
       </div>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Cookie での同期が使えない場合のフォールバック。既存の JSON ファイルをアップロードしてください。</p>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:10px">自動ログインが使えない場合のフォールバック。既存の JSON ファイルをアップロードしてください。</p>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn" onclick="openJsonUpload()">📂 JSON ファイルをアップロード</button>
         <input type="file" id="sync-file-input" accept=".json" style="display:none" onchange="handleJsonUpload(event)">
@@ -381,7 +374,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.page === 'dashboard') loadDashboard();
     if (tab.dataset.page === 'inventory') loadInventory();
     if (tab.dataset.page === 'profit') loadProfit();
-    if (tab.dataset.page === 'sync') loadSyncItems();
+    if (tab.dataset.page === 'sync') { loadSyncItems(); checkCredentials(); }
   });
 });
 
@@ -881,52 +874,40 @@ document.getElementById('disc-price-min').addEventListener('change', () => { dis
 document.getElementById('disc-price-max').addEventListener('change', () => { discPage = 1; loadDiscoveryItems(); });
 
 // ══════════════════════════════════════════════════
-// SYNC (Mercari 持ち物 - Cookie-based)
+// SYNC (Mercari 持ち物 - Auto-login via Playwright)
 // ══════════════════════════════════════════════════
 let _syncPollTimer = null;
 
-// ── Cookie management ──────────────────────────────────
-async function saveMercariCookie() {
-  const input = document.getElementById('mercari-cookie-input');
-  const cookie = input.value.trim();
-  if (!cookie) {
-    alert('Cookie を入力してください');
-    return;
-  }
+// ── Credentials check ────────────────────────────────
+async function checkCredentials() {
   try {
-    await api('/api/settings/mercari-cookie', {
-      method: 'POST',
-      body: JSON.stringify({ cookie: cookie }),
-    });
-    document.getElementById('cookie-status').innerHTML = '<span style="color:var(--green)">✅ Cookie を保存しました</span>';
+    const data = await api('/api/settings/mercari-credentials/status');
+    const statusEl = document.getElementById('credentials-status');
+    if (data.has_email && data.has_password) {
+      statusEl.innerHTML = `<span style="color:var(--green)">✅ メールアドレス・パスワード設定済み (${data.email_masked})</span>`;
+    } else if (data.has_email) {
+      statusEl.innerHTML = '<span style="color:var(--yellow)">⚠️ メールアドレスは設定済みですが、パスワードが未設定です</span>';
+    } else if (data.has_password) {
+      statusEl.innerHTML = '<span style="color:var(--yellow)">⚠️ パスワードは設定済みですが、メールアドレスが未設定です</span>';
+    } else {
+      statusEl.innerHTML = '<span style="color:var(--red)">❌ メールアドレス・パスワードが未設定です。サーバーの .env に MERCARI_EMAIL と MERCARI_PASSWORD を設定してください。</span>';
+    }
   } catch(e) {
-    document.getElementById('cookie-status').innerHTML = `<span style="color:var(--red)">エラー: ${e.message}</span>`;
+    document.getElementById('credentials-status').innerHTML = '<span style="color:var(--text2)">確認できませんでした</span>';
   }
+}
+
+// ── Legacy cookie functions (no-op, kept for compat) ──
+async function saveMercariCookie() {
+  alert('Cookie 方式は非推奨です。MERCARI_EMAIL と MERCARI_PASSWORD を .env に設定してください。');
 }
 
 async function deleteMercariCookie() {
-  if (!confirm('Mercari Cookie を削除しますか？')) return;
-  try {
-    await api('/api/settings/mercari-cookie', { method: 'DELETE' });
-    document.getElementById('mercari-cookie-input').value = '';
-    document.getElementById('cookie-status').innerHTML = '<span style="color:var(--yellow)">Cookie を削除しました</span>';
-  } catch(e) {
-    document.getElementById('cookie-status').innerHTML = `<span style="color:var(--red)">エラー: ${e.message}</span>`;
-  }
+  alert('Cookie 方式は非推奨です。');
 }
 
 async function loadCookieStatus() {
-  try {
-    const data = await api('/api/settings/mercari-cookie/status');
-    const statusEl = document.getElementById('cookie-status');
-    if (data.has_cookie) {
-      statusEl.innerHTML = `<span style="color:var(--green)">✅ Cookie が設定されています (${data.cookie_length} 文字)</span>`;
-    } else {
-      statusEl.innerHTML = '<span style="color:var(--yellow)">⚠️ Cookie が設定されていません</span>';
-    }
-  } catch(e) {
-    // ignore
-  }
+  checkCredentials();
 }
 
 // ── Trigger sync ───────────────────────────────────────
