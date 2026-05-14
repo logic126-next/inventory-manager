@@ -231,10 +231,11 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
       </div>
       <p style="font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.6">
         Mercari にログインしたブラウザから Cookie をコピーして貼り付けてください。<br>
-        <strong>取得方法:</strong> Mercari を開く → F12（開発者ツール）→ Application → Cookies → <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">session_id</code> の値をコピー → 以下に貼り付け
+        <strong>取得方法:</strong> Mercari を開く → F12（開発者ツール）→ Application → Cookies → <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">SID</code> と <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">SSID</code> の値をコピー<br>
+        <strong>貼り付け例:</strong> <code style="background:var(--bg3);padding:1px 4px;border-radius:3px;font-size:11px">SID=abc123; SSID=def456</code>（セミコロンで区切る）
       </p>
       <div class="form-group">
-        <textarea id="mercari-cookie-input" placeholder="session_id=abc123def456..." style="min-height:60px;font-family:monospace;font-size:12px"></textarea>
+        <textarea id="mercari-cookie-input" placeholder="SID=abc123...; SSID=def456..." style="min-height:60px;font-family:monospace;font-size:12px"></textarea>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="saveMercariCookie()">💾 Cookie を保存</button>
