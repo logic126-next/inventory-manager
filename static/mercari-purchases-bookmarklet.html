@@ -69,7 +69,8 @@
 
 <script>
 const serverUrl = window.location.origin;
-document.getElementById('server-url').value = serverUrl;
+const base = window.location.pathname.split('/static/')[0];
+document.getElementById('server-url').value = serverUrl + base;
 
 function generateBookmarklet() {
   const url = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
