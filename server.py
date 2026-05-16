@@ -1474,11 +1474,19 @@ def _extract_purchases_from_page(page) -> list[MercariOwnedItem]:
 
 def _run_playwright_purchases_sync(cookie_str: str | None = None) -> dict:
     """Run the Playwright sync for Mercari purchases page."""
+    import signal
     from playwright.sync_api import sync_playwright
+
+    def _timeout_handler(signum, frame):
+        raise TimeoutError("購入履歴同期が60秒以内に完了しませんでした")
+
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(60)
 
     if not cookie_str:
         cookie_str = _read_env_value("MERCARI_COOKIE")
     if not cookie_str:
+        signal.alarm(0)
         return {"error": "Mercari の Cookie が設定されていません。同期タブで Cookie を入力してください。"}
 
     _purchases_sync_state["running"] = True
@@ -1488,6 +1496,7 @@ def _run_playwright_purchases_sync(cookie_str: str | None = None) -> dict:
 
     cookies = _parse_cookie_string(cookie_str)
     if not cookies:
+        signal.alarm(0)
         return {"error": "Cookie の形式が正しくありません。"}
 
     _purchases_sync_state["progress"] = f"{len(cookies)} 個の Cookie を読み込みました。ブラウザを起動中..."
@@ -1537,19 +1546,19 @@ def _run_playwright_purchases_sync(cookie_str: str | None = None) -> dict:
 
             # Navigate to purchases page
             _purchases_sync_state["progress"] = "Mercari 購入履歴にアクセス中..."
-            page.goto("https://jp.mercari.com/mypage/purchases", wait_until="domcontentloaded", timeout=30000)
-
-            _purchases_sync_state["progress"] = "ページ内容を読み込み中..."
             try:
-                page.wait_for_load_state("networkidle", timeout=20000)
-            except Exception:
-                page.wait_for_timeout(5000)
+                resp = page.goto("https://jp.mercari.com/mypage/purchases", wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_load_state("load", timeout=15000)
+            except Exception as e:
+                browser.close()
+                return {"error": f"ページ読み込みに失敗しました: {str(e)}"}
 
             current_url = page.url
             if "/login" in current_url or "sign_in" in current_url:
                 browser.close()
                 return {"error": f"ログインページにリダイレクトされました ({current_url})。Cookie が期限切れです。"}
 
+            _purchases_sync_state["progress"] = "ページ内容を読み込み中..."
             page.wait_for_timeout(3000)
 
             # Scroll to load more items
@@ -1569,7 +1578,7 @@ def _run_playwright_purchases_sync(cookie_str: str | None = None) -> dict:
             browser.close()
 
             if not items:
-                return {"error": "購入履歴の商品が見つかりませんでした。Cookie が有効か確認してください。"}
+                return {"error": "購入履歴の商品が見つかりませんでした。Cookie が有効か、または購入履歴が空かもしれません。"}
 
             _purchases_sync_state["progress"] = f"{len(items)} 件の商品が見つかりました。データベースに保存中..."
 
@@ -1578,11 +1587,16 @@ def _run_playwright_purchases_sync(cookie_str: str | None = None) -> dict:
             _purchases_sync_state["result"] = result
             return result
 
+    except TimeoutError as e:
+        error_msg = f"購入履歴同期がタイムアウトしました: {str(e)}"
+        _purchases_sync_state["error"] = error_msg
+        return {"error": error_msg}
     except Exception as e:
         error_msg = f"購入履歴同期に失敗しました: {str(e)}"
         _purchases_sync_state["error"] = error_msg
         return {"error": error_msg}
     finally:
+        signal.alarm(0)
         _purchases_sync_state["running"] = False
 
 
