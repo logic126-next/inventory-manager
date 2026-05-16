@@ -155,21 +155,24 @@ function generateBookmarklet() {
       });
     }
 
-    setStatus("\\ud83d\\udccb","商品を読み込み中...");
-    scrollLoad().then(function(){
+   // Main execution
+    (async function(){
+      setStatus("\ud83d\udccb","商品を読み込み中...");
+      await scrollLoad();
       extractItems();
       if(items.length===0){
-        setStatus("\\u26a0\\ufe0f","商品が見つかりませんでした","img: "+document.querySelectorAll("img").length+"件");
+        setStatus("\u26a0\ufe0f","商品が見つかりませんでした","img: "+document.querySelectorAll("img").length+"件");
         setTimeout(function(){document.body.removeChild(ov);},5000);return;
       }
       var total=items.length;
-      setStatus("\\ud83d\\udce4",total+"件の商品を送信中...","Inventory Managerに送信しています");
+      setStatus("\ud83d\udce4",total+"件の商品を送信中...","Inventory Managerに送信しています");
       var result=null,error=null;
       try{
         var resp=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:items})});
         if(resp.ok){result=await resp.json();}
         else{error="HTTP "+resp.status+" - "+resp.statusText;}
       }catch(fe){
+        // Fallback: hidden form POST (bypasses CORS)
         try{
           var f=document.createElement("form");
           f.method="POST";f.action=api;f.target="_blank";
@@ -177,25 +180,30 @@ function generateBookmarklet() {
           var t=document.createElement("textarea");
           t.name="items_json";t.value=JSON.stringify({items:items});
           f.appendChild(t);document.body.appendChild(f);f.submit();document.body.removeChild(f);
-          error="\\u30d5\\u30a9\\u30fc\\u30e0\\u9001\\u4fe1\\u3057\\u307e\\u3057\\u305f\\u3002\\u65b0\\u3057\\u3044\\u30bf\\u30d6\\u3067\\u7d50\\u679c\\u3092\\u78ba\\u8a8d\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044\\u3002";
+          error="フォーム送信しました。新しいタブで結果を確認してください。";
         }catch(fe2){
-          try{await navigator.clipboard.writeText(JSON.stringify({items:items}));error="\\u30af\\u30ea\\u30c3\\u30d7\\u30dc\\u30fc\\u30c9\\u306b\\u30b3\\u30d4\\u30fc\\u3057\\u307e\\u3057\\u305f\\u3002";}
-          catch(fe3){error="\\u9001\\u4fe1\\u30a8\\u30e9\\u30fc: "+fe.message;}
+          // Last resort: copy to clipboard
+          try{
+            await navigator.clipboard.writeText(JSON.stringify({items:items}));
+            error="クリップボードにコピーしました。";
+          }catch(fe3){
+            error="送信エラー: "+fe.message;
+          }
         }
       }
       if(result){
         var created=result.created||0,updated=result.updated||0,skipped=result.skipped||0;
-        setStatus("\\u2705",total+"\\u4ef6\\u540c\\u671f\\u5b8c\\u4e86\\uff01","\\u65b0\\u898f:"+created+" \\u66f4\\u65b0:"+updated+" \\u30b9\\u30ad\\u30c3\\u30d7:"+skipped);
+        setStatus("\u2705",total+"件同期完了\uff01","新規:"+created+" 更新:"+updated+" スキップ:"+skipped);
         msText.style.color="#3fb950";
-      }else if(error&&error.includes("\\u30af\\u30ea\\u30c3\\u30d7\\u30dc\\u30fc\\u30c0")){
-        setStatus("\\ud83d\\udccb",error,"");msText.style.color="#d29922";
-      }else if(error&&error.includes("\\u30bf\\u30d6")){
-        setStatus("\\ud83d\\udd17","\\u65b0\\u3057\\u3044\\u30bf\\u30d6\\u3067\\u51e6\\u7406\\u4e2d...","\\u7d50\\u679c\\u306f\\u65b0\\u3057\\u3044\\u30bf\\u30d6\\u3067\\u78ba\\u8a8d\\u3067\\u304d\\u307e\\u3059");msText.style.color="#58a6ff";
+      }else if(error&&error.includes("クリップボード")){
+        setStatus("\ud83d\udccb",error,"");msText.style.color="#d29922";
+      }else if(error&&error.includes("タブ")){
+        setStatus("\ud83d\udd17","新しいタブで処理中...","結果は新しいタブで確認できます");msText.style.color="#58a6ff";
       }else{
-        setStatus("\\u274c","\\u30a8\\u30e9\\u30fc: "+(error||"\\u4e0d\\u660e"),"\\u518d\\u5ea6\\u304a\\u8a66\\u3057\\u304f\\u3060\\u3055\\u3044");msText.style.color="#f85149";
+        setStatus("\u274c","エラー: "+(error||"不明"),"再試してください");msText.style.color="#f85149";
       }
       setTimeout(function(){document.body.removeChild(ov);},result?5000:8000);
-    });
+    })();
   }();`;
 
   const encoded = 'javascript:' + encodeURIComponent(bmCode);
