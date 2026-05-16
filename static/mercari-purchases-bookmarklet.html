@@ -103,6 +103,9 @@ function generateBookmarklet() {
       if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
       m=text.match(/(\\d{1,2})月(\\d{1,2})日/);
       if(m){var y=new Date().getFullYear();return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}
+      // Mercari購入履歴 format: "3/10" or "5/15"
+      m=text.match(/(\\d{1,2})\\/(\\d{1,2})$/);
+      if(m){var y=new Date().getFullYear();return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}
       return null;
     }
 
