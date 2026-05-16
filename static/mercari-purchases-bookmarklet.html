@@ -180,7 +180,7 @@ function generateBookmarklet() {
     xhr.send(JSON.stringify({items:items}));
   }();`;
 
-  const encoded = 'javascript:' + S(bmCode);
+  const encoded = 'javascript:' + encodeURIComponent(bmCode);
   document.getElementById('bm-link').href = encoded;
   document.getElementById('bookmarklet-output').innerHTML =
     '<div style="font-size:12px;color:var(--green);margin-top:8px">✅ ブックマークレットが生成されました</div>';
@@ -206,6 +206,7 @@ function copyBookmarkletURL() {
 }
 
 generateBookmarklet();
+window.addEventListener('load', generateBookmarklet);
 </script>
 </body>
 </html>
