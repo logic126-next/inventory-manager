@@ -310,11 +310,12 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   <div class="card" style="border-color:var(--purple);background:rgba(168,85,247,0.03)">
     <h3 style="margin-bottom:8px">🛒 Mercari 購入履歴同期</h3>
     <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">
-      <a href="https://jp.mercari.com/mypage/purchases" target="_blank" style="color:var(--purple)">購入履歴ページ</a> の商品を一括でインポートします。
-      Cookie を設定後、ボタンを押すだけで完了します。
+      <a href="https://jp.mercari.com/mypage/purchases" target="_blank" style="color:var(--purple)">購入履歴ページ</a> の商品を一括でインポートします。<br>
+      ブックマークレット方式：Mercari 購入履歴ページでブックマークをクリックするだけで完了します。
     </p>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-      <button class="btn btn-primary btn-sm" onclick="startPurchasesSync()" id="purchases-sync-btn">🛒 購入履歴を同期</button>
+      <a href="/static/mercari-purchases-bookmarklet.html" class="btn btn-primary btn-sm" style="text-decoration:none">🔖 ブックマークレットを取得</a>
+      <span style="font-size:12px;color:var(--text2)">→ 購入履歴ページでクリック</span>
     </div>
     <div id="purchases-sync-status" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
   </div>

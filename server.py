@@ -1899,8 +1899,26 @@ async def mercari_owned_sync_status():
 # ── Bookmarklet API Key Config ──────────────────────────
 # ── Mercari Purchases Sync API ──────────────────────────
 @app.post("/api/scrapers/mercari/purchases/sync")
-async def trigger_mercari_purchases_sync(req: MercariSyncRequest | None = None):
-    """Trigger Mercari purchases page sync using Playwright."""
+async def trigger_mercari_purchases_sync(req: MercariSyncRequest | None = None, x_api_key: str | None = Header(None)):
+    """Trigger Mercari purchases sync. Supports:
+    1. Bookmarklet: sends pre-parsed items via items field
+    2. Playwright: uses cookies from env to scrape purchases page
+    """
+    # API key check (for bookmarklet)
+    api_key_config = _get_bookmarklet_api_key()
+    if api_key_config:
+        api_key = x_api_key or ""
+        if not api_key or api_key != api_key_config:
+            raise HTTPException(status_code=403, detail="APIキーが無効です")
+
+    # Bookmarklet mode: save pre-parsed items directly
+    if req and req.items:
+        converted = [MercariOwnedItem(**item) for item in req.items]
+        result = _save_purchases_to_db(converted)
+        _purchases_sync_state["result"] = result
+        _purchases_sync_state["running"] = False
+        return result
+
     if _purchases_sync_state["running"]:
         return {
             "status": "running",

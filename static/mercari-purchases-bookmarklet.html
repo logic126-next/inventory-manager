@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mercari 購入履歴同期 - ブックマークレット</title>
+<style>
+  :root { --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--text2:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--purple:#bc8cff;--radius:10px; }
+  * { margin:0;padding:0;box-sizing:border-box; }
+  body { font-family:-apple-system,'Hiragino Sans','Meiryo',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px; }
+  .container { max-width:700px;width:100%; }
+  h1 { font-size:22px;margin-bottom:8px;text-align:center; }
+  .subtitle { text-align:center;color:var(--text2);font-size:14px;margin-bottom:24px; }
+  .card { background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px; }
+  .card h3 { font-size:15px;margin-bottom:12px; }
+  .steps { list-style:none;counter-reset:step; }
+  .steps li { counter-increment:step;padding:10px 0 10px 40px;position:relative;border-bottom:1px solid var(--border);font-size:14px;line-height:1.6; }
+  .steps li:last-child { border-bottom:none; }
+  .steps li::before { content:counter(step);position:absolute;left:8px;top:10px;width:24px;height:24px;background:var(--purple);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700; }
+  .bookmarklet-link { display:block;padding:16px;background:linear-gradient(135deg,#1a1a2e,#161b22);border:2px dashed var(--purple);border-radius:var(--radius);text-align:center;margin:12px 0;transition:.2s;cursor:grab;font-size:14px;color:var(--purple);word-break:break-all;text-decoration:none; }
+  .bookmarklet-link:hover { background:rgba(188,140,255,0.1);border-style:solid; }
+  .note { font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5; }
+  .config { display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap; }
+  .config input { flex:1;min-width:200px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px; }
+  .btn { padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;transition:.15s; }
+  .btn:hover { background:var(--border); }
+  .btn-primary { background:var(--purple);color:#fff;border-color:var(--purple); }
+  .btn-primary:hover { opacity:.85; }
+  .back-link { display:inline-block;margin-top:16px;color:var(--text2);font-size:14px;text-decoration:none; }
+  .back-link:hover { color:var(--text); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🛒 Mercari 購入履歴同期</h1>
+  <p class="subtitle">ブックマークレットで購入履歴をインポート</p>
+
+  <div class="card">
+    <h3>⚙️ 設定</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Inventory Manager のサーバーアドレスを入力してください。</p>
+    <div class="config">
+      <input type="text" id="server-url" placeholder="http://192.168.1.203:8080">
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📋 使い方</h3>
+    <ol class="steps">
+      <li>Mercari にログインし、<a href="https://jp.mercari.com/mypage/purchases" target="_blank" style="color:var(--purple)">購入履歴ページ</a>を開きます。</li>
+      <li>下の<strong>ブックマークリンク</strong>をドラッグしてブックマークバーにドロップします。</li>
+      <li>購入履歴ページでブックマークをクリック → 商品データを抽出して送信します。</li>
+      <li>完了すると「XX件同期完了」と表示されます。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>🔖 ブックマークレット</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:8px">リンクをブックマークバーにドロップしてください。</p>
+    <a id="bm-link" class="bookmarklet-link" href="#">Mercari 購入履歴同期</a>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-primary" onclick="generateBookmarklet()">🔄 生成</button>
+      <button class="btn" onclick="copyBookmarkletURL()">📋 コピー</button>
+    </div>
+    <div id="bookmarklet-output"></div>
+  </div>
+
+  <a class="back-link" href="/">← Inventory Manager に戻る</a>
+</div>
+
+<script>
+const serverUrl = window.location.origin;
+document.getElementById('server-url').value = serverUrl;
+
+function generateBookmarklet() {
+  const url = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
+
+  const bmCode = `!function(){
+    var S=encodeURIComponent;
+    var serverUrl="${url}";
+    var api=serverUrl+"/api/scrapers/mercari/purchases/sync";
+
+    if(!location.hostname.includes("mercari.com")){alert("Mercari.jpのページで実行してください");return;}
+
+    var ov=document.createElement("div");
+    ov.id="mercari-purchases-overlay";
+    ov.style.cssText="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;color:#e6edf3";
+    ov.innerHTML='<div style="text-align:center;padding:40px"><div id="ms-icon" style="font-size:48px;margin-bottom:16px">🛒</div><div id="ms-text" style="font-size:18px;font-weight:600">読み込み中...</div><div id="ms-sub" style="font-size:14px;color:#8b949e;margin-top:8px"></div></div>';
+    document.body.appendChild(ov);
+    var msText=document.getElementById("ms-text");
+    var msSub=document.getElementById("ms-sub");
+    var msIcon=document.getElementById("ms-icon");
+    function setStatus(icon,text,sub){msIcon.textContent=icon;msText.textContent=text;if(sub)msSub.textContent=sub;}
+
+    var items=[];
+    var seen=new Set();
+
+    function extractItems(){
+      items=[];seen.clear();
+      var allLinks=document.querySelectorAll('a[href*="/items/"]');
+      for(var i=0;i<allLinks.length;i++){
+        var link=allLinks[i];
+        var href=link.getAttribute("href");
+        if(!href)continue;
+        var fullUrl="https://jp.mercari.com"+href;
+        if(seen.has(fullUrl))continue;
+        seen.add(fullUrl);
+
+        var card=link.closest("[class*='PurchaseOrder'], [class*='purchase'], [class*='Card'], article, div");
+        if(!card) card=link.parentElement;
+
+        var name=link.textContent.trim();
+        if(!name||name.length<2) continue;
+
+        var price=0;
+        var priceEl=card?.querySelector('[class*="price"], [class*="Price"]');
+        if(priceEl){var ptxt=priceEl.textContent.trim();var pm=ptxt.match(/¥\\s*(\\d[,\\d]*)/);if(pm)price=parseInt(pm[1].replace(/,/g,''));}
+        if(!price){
+          var allP=card?.querySelectorAll('*')||[];
+          for(var pi=0;pi<allP.length&&pi<30;pi++){
+            var pt=allP[pi].textContent.trim();
+            var pmatch=pt.match(/^(¥\\s*)?(\\d[,\\d]+)$/);
+            if(pmatch&&parseInt(pmatch[2].replace(/,/g,''))>100){price=parseInt(pmatch[2].replace(/,/g,''));break;}
+          }
+        }
+
+        var imageUrl="";
+        var imgEl=card?.querySelector('img');
+        if(imgEl){imageUrl=imgEl.getAttribute("src")||imgEl.getAttribute("data-src")||"";}
+
+        items.push({name:name,price:price,status:"",url:fullUrl,image_url:imageUrl});
+      }
+    }
+
+    setStatus("📋","商品データを抽出中...");
+    extractItems();
+
+    if(items.length===0){
+      setStatus("⚠️","商品が見つかりませんでした","購入履歴が空か、Mercariのページデザインが変更された可能性があります。");
+      setTimeout(function(){document.body.removeChild(ov);},5000);
+      return;
+    }
+
+    setStatus("📤",""+items.length+"件をサーバーに送信中...");
+
+    var xhr=new XMLHttpRequest();
+    xhr.open("POST",api,true);
+    xhr.setRequestHeader("Content-Type","application/json");
+    xhr.timeout=30000;
+    xhr.onreadystatechange=function(){
+      if(xhr.readyState!==4)return;
+      if(xhr.status===0){
+        setStatus("❌","ネットワークエラー","サーバーに接続できません。同じネットワークか確認してください。");
+        setTimeout(function(){document.body.removeChild(ov);},8000);
+        return;
+      }
+      try{
+        var resp=JSON.parse(xhr.responseText);
+        if(resp.error){
+          setStatus("❌","エラー",resp.error);
+          setTimeout(function(){document.body.removeChild(ov);},8000);
+          return;
+        }
+        setStatus("✅","同期完了！",
+          (resp.created||0)+"件新規 / "+(resp.updated||0)+"件更新 / "+(resp.skipped||0)+"件スキップ");
+        setTimeout(function(){document.body.removeChild(ov);},5000);
+      }catch(e){
+        setStatus("❌","エラー",""+e.message);
+        setTimeout(function(){document.body.removeChild(ov);},5000);
+      }
+    };
+    xhr.onerror=function(){
+      setStatus("❌","ネットワークエラー","サーバーに接続できません。");
+      setTimeout(function(){document.body.removeChild(ov);},8000);
+    };
+    xhr.ontimeout=function(){
+      setStatus("⏱️","タイムアウト","サーバーの応答がありません。");
+      setTimeout(function(){document.body.removeChild(ov);},8000);
+    };
+    xhr.send(JSON.stringify({items:items}));
+  }();`;
+
+  const encoded = 'javascript:' + S(bmCode);
+  document.getElementById('bm-link').href = encoded;
+  document.getElementById('bookmarklet-output').innerHTML =
+    '<div style="font-size:12px;color:var(--green);margin-top:8px">✅ ブックマークレットが生成されました</div>';
+}
+
+function copyBookmarkletURL() {
+  const link = document.getElementById('bm-link');
+  if (link.href === '#') {
+    alert('まず「生成」ボタンを押してください');
+    return;
+  }
+  navigator.clipboard.writeText(link.href).then(() => {
+    alert('URLをコピーしました');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = link.href;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('URLをコピーしました');
+  });
+}
+
+generateBookmarklet();
+</script>
+</body>
+</html>
