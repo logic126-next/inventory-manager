@@ -32,12 +32,15 @@ import yaml
 # ── Init ────────────────────────────────────────────────
 init_db()
 
+# API key for Mercari bookmarklet sync (from .env)
+_INV_SYNC_API_KEY = os.environ.get("INV_SYNC_API_KEY", "")
+
 app = FastAPI(title="Inventory Manager")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "x-api-key"],
 )
 
 # Mount static files
@@ -130,6 +133,7 @@ async def list_items(
     status: str | None = Query(None),
     platform: str | None = Query(None),
     search: str | None = Query(None),
+    sort: str | None = Query(None),  # added: purchase_price_asc, purchase_price_desc, sale_price_asc, sale_price_desc, profit_asc, profit_desc, created_at_desc, created_at_asc
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
 ):
@@ -151,12 +155,35 @@ async def list_items(
         where_sql = " WHERE " + " AND ".join(where) if where else ""
         offset = (page - 1) * per_page
 
-        rows = conn.execute(
-            f"SELECT i.*, l.name as location_name "
-            f"FROM items i LEFT JOIN locations l ON i.location_id = l.id "
-            f"{where_sql} ORDER BY i.created_at DESC LIMIT ? OFFSET ?",
-            params + [per_page, offset],
-        ).fetchall()
+        # Sort mapping
+        sort_map = {
+            "purchase_price_asc": "i.purchase_price ASC",
+            "purchase_price_desc": "i.purchase_price DESC",
+            "sale_price_asc": "sr.sale_price ASC",
+            "sale_price_desc": "sr.sale_price DESC",
+            "profit_asc": "sr.net_profit ASC",
+            "profit_desc": "sr.net_profit DESC",
+            "created_at_desc": "i.created_at DESC",
+            "created_at_asc": "i.created_at ASC",
+        }
+        order_clause = sort_map.get(sort, "i.created_at DESC")
+
+        # For sale_price/profit sorting, need LEFT JOIN with latest sale
+        if sort in ("sale_price_asc", "sale_price_desc", "profit_asc", "profit_desc"):
+            rows = conn.execute(
+                f"SELECT i.*, l.name as location_name, sr as sale_ref "
+                f"FROM items i LEFT JOIN locations l ON i.location_id = l.id "
+                f"LEFT JOIN sale_records sr ON i.id = sr.item_id AND sr.id = (SELECT id FROM sale_records WHERE item_id = i.id ORDER BY sale_date DESC LIMIT 1) "
+                f"{where_sql} ORDER BY {order_clause} LIMIT ? OFFSET ?",
+                params + [per_page, offset],
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT i.*, l.name as location_name "
+                f"FROM items i LEFT JOIN locations l ON i.location_id = l.id "
+                f"{where_sql} ORDER BY {order_clause} LIMIT ? OFFSET ?",
+                params + [per_page, offset],
+            ).fetchall()
 
         total = conn.execute(
             f"SELECT COUNT(*) FROM items i LEFT JOIN locations l ON i.location_id = l.id{where_sql}", params
@@ -974,51 +1001,34 @@ def _remove_env_value(key: str):
     _ENV_FILE.write_text("\n".join(lines) + "\n")
 
 
-# ── Credentials Settings API ────────────────────────────
-class CredentialsStatusResponse(BaseModel):
-    has_email: bool
-    has_password: bool
+# ── Cookie Settings API ────────────────────────────────
+class MercariCookieRequest(BaseModel):
+    cookie_str: str
 
 
-@app.get("/api/settings/mercari-credentials/status")
-async def get_mercari_credentials_status():
-    """Check if Mercari email and password are set in .env."""
-    email = _read_env_value("MERCARI_EMAIL")
-    password = _read_env_value("MERCARI_PASSWORD")
-    has_email = bool(email)
-    has_password = bool(password)
-    return {
-        "has_email": has_email,
-        "has_password": has_password,
-        "email_masked": email[:3] + "***" if email else "",
-    }
-
-
-# ── Legacy cookie endpoints (kept for backward compat, no-op) ──
 @app.post("/api/settings/mercari-cookie")
-async def save_mercari_cookie_legacy():
-    """Legacy endpoint — credentials are now set via .env file."""
-    return {"status": "deprecated", "message": "Cookie 方式は非推奨です。MERCARI_EMAIL と MERCARI_PASSWORD を .env に設定してください。"}
+async def save_mercari_cookie(req: MercariCookieRequest):
+    """Save raw Mercari cookie string to .env file."""
+    _write_env_value("MERCARI_COOKIE", req.cookie_str)
+    return {"status": "ok", "message": "Cookie を保存しました"}
 
 
 @app.get("/api/settings/mercari-cookie/status")
-async def get_mercari_cookie_status_legacy():
-    """Legacy endpoint — forwards to credentials check."""
-    email = _read_env_value("MERCARI_EMAIL")
-    password = _read_env_value("MERCARI_PASSWORD")
-    has_creds = bool(email and password)
+async def get_mercari_cookie_status():
+    """Check if Mercari cookie is set."""
+    cookie = _read_env_value("MERCARI_COOKIE")
+    has_cookie = bool(cookie)
     return {
-        "has_cookie": has_creds,  # Keep field name for backward compat
-        "cookie_length": 0,
-        "has_email": bool(email),
-        "has_password": bool(password),
+        "has_cookie": has_cookie,
+        "cookie_length": len(cookie) if cookie else 0,
     }
 
 
 @app.delete("/api/settings/mercari-cookie")
-async def delete_mercari_cookie_legacy():
-    """Legacy endpoint — no-op."""
-    return {"status": "deprecated", "message": "Cookie 方式は非推奨です。"}
+async def delete_mercari_cookie():
+    """Remove stored Mercari cookie."""
+    _remove_env_value("MERCARI_COOKIE")
+    return {"status": "ok", "message": "Cookie を削除しました"}
 
 
 # ── Mercari Owned Items Sync (Playwright) ───────────────
@@ -1196,95 +1206,143 @@ def _extract_items_from_page(page) -> list[MercariOwnedItem]:
     return items
 
 
-def _run_playwright_sync() -> dict:
-    """Run the Playwright sync with auto-login (called from async task)."""
+def _parse_cookie_string(cookie_str: str) -> list[dict]:
+    """Parse raw cookie string from browser Network tab into Playwright cookie dicts.
+
+    Accepts formats like:
+      'snexid=abc123; snexid_r=def456; ttcsid=ghi789'
+      or individual lines:
+      'snexid=abc123\nsnexid_r=def456\nttcsid=ghi789'
+    """
+    cookies = []
+    # Split on semicolons first (common browser format)
+    if ";" in cookie_str:
+        parts = [p.strip() for p in cookie_str.split(";")]
+    else:
+        # Try line-separated format
+        parts = [line.strip() for line in cookie_str.splitlines()]
+
+    for part in parts:
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        key, _, value = part.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if key and value:
+            cookies.append({
+                "name": key,
+                "value": value,
+                "domain": ".jp.mercari.com",
+                "path": "/",
+                "secure": True,
+                "http_only": False,
+            })
+    return cookies
+
+
+def _run_playwright_sync(cookie_str: str | None = None) -> dict:
+    """Run the Playwright sync using cookie-based auth with stealth settings."""
     from playwright.sync_api import sync_playwright
 
-    email = _read_env_value("MERCARI_EMAIL")
-    password = _read_env_value("MERCARI_PASSWORD")
-    if not email or not password:
-        return {"error": "Mercari のメールアドレス・パスワードが設定されていません。サーバーの .env に MERCARI_EMAIL と MERCARI_PASSWORD を設定してください。"}
+    # Use provided cookie string or fall back to stored one
+    if not cookie_str:
+        cookie_str = _read_env_value("MERCARI_COOKIE")
+    if not cookie_str:
+        return {"error": "Mercari の Cookie が設定されていません。同期タブで Cookie を入力してください。"}
 
     _sync_state["running"] = True
-    _sync_state["progress"] = "ブラウザを起動中..."
+    _sync_state["progress"] = "Cookie をパース中..."
     _sync_state["error"] = None
     _sync_state["result"] = None
 
+    cookies = _parse_cookie_string(cookie_str)
+    if not cookies:
+        return {"error": "Cookie の形式が正しくありません。ブラウザの Network タブから Cookie ヘッダーをコピーしてください。"}
+
+    _sync_state["progress"] = f"{len(cookies)} 個の Cookie を読み込みました。ブラウザを起動中..."
+
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            # Launch with stealth args to avoid headless detection
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                ],
             )
+
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                locale="ja-JP",
+            )
+
+            # Stealth: override navigator.webdriver and other detection signals
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => false});
+                // Override plugins to look more like a real browser
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5],
+                });
+                // Override languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['ja-JP', 'ja', 'en-US', 'en'],
+                });
+                // Chrome runtime override
+                window.chrome = { runtime: {} };
+                // Override permissions
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                    Promise.resolve({state: Notification.permission}) :
+                    originalQuery(parameters)
+                );
+            """)
+
+            # Add cookies to context
+            _sync_state["progress"] = "Cookie をブラウザに設定中..."
+            context.add_cookies(cookies)
+
             page = context.new_page()
 
-            # ── Step 1: Navigate to login page ──────────────────────
-            _sync_state["progress"] = "Mercari ログインページにアクセス中..."
-            page.goto("https://jp.mercari.com/login", wait_until="domcontentloaded", timeout=30000)
-
-            # ── Step 2: Enter email and click 「次へ」 ──────────────
-            _sync_state["progress"] = "メールアドレスを入力中..."
-            # Wait for email input field (multiple possible selectors)
-            page.wait_for_selector(
-                "input[type='email'], input[name='email'], input[placeholder*='メール'], input[placeholder*='email'], input[placeholder*='Email']",
-                timeout=15000,
-            )
-            email_input = page.query_selector("input[type='email'], input[name='email'], input[placeholder*='メール']")
-            if not email_input:
-                raise RuntimeError("メールアドレス入力欄が見つかりませんでした")
-            email_input.fill(email)
-
-            # Click 「次へ」(Next) button
-            _sync_state["progress"] = "「次へ」をクリック中..."
-            next_btn = page.wait_for_selector(
-                "button[type='submit'], button:has-text('次へ'), button:has-text('Next')",
-                timeout=10000,
-            )
-            next_btn.click()
-
-            # ── Step 3: Wait for password field, enter password ─────
-            _sync_state["progress"] = "パスワードを入力中..."
-            page.wait_for_selector(
-                "input[type='password'], input[name='password']",
-                timeout=15000,
-            )
-            password_input = page.query_selector("input[type='password']")
-            if not password_input:
-                raise RuntimeError("パスワード入力欄が見つかりませんでした")
-            password_input.fill(password)
-
-            # Click 「ログイン」(Login) button
-            _sync_state["progress"] = "「ログイン」をクリック中..."
-            login_btn = page.wait_for_selector(
-                "button[type='submit'], button:has-text('ログイン'), button:has-text('Login')",
-                timeout=10000,
-            )
-            login_btn.click()
-
-            # ── Step 4: Wait for login to complete ──────────────────
-            _sync_state["progress"] = "ログイン完了を待機中..."
-            # Wait for redirect away from login page
-            page.wait_for_url(
-                lambda url: "/login" not in url,
-                timeout=30000,
-            )
-            # Extra wait for SPA to fully render
-            page.wait_for_timeout(3000)
-
-            # ── Step 5: Navigate to inventory page ──────────────────
+            # ── Navigate directly to inventory page ──────────────────
             _sync_state["progress"] = "Mercari 持ち物一覧にアクセス中..."
-            page.goto("https://jp.mercari.com/mypage/inventory", wait_until="networkidle", timeout=30000)
+            page.goto("https://jp.mercari.com/mypage/inventory", wait_until="domcontentloaded", timeout=30000)
 
-            # Wait for content to load (SPA might need extra time)
+            # Wait for network idle (items load via API calls)
             _sync_state["progress"] = "ページ内容を読み込み中..."
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                # Some resources may hang, continue anyway
+                page.wait_for_timeout(5000)
+
+            # Check if we were redirected to login (cookie expired / detected as headless)
+            current_url = page.url
+            if "/login" in current_url or "sign_in" in current_url:
+                browser.close()
+                return {"error": f"ログインページにリダイレクトされました ({current_url})。Cookie が期限切れか、ブラウザが検出された可能性があります。ブラウザの Network タブから新しい Cookie をコピーしてください。"}
+
+            # Extra wait for SPA to fully render
             page.wait_for_timeout(3000)
 
             # Try scrolling to load more items if there's a scrollbar
             _sync_state["progress"] = "すべての商品を読み込み中..."
-            for _ in range(5):
-                page.evaluate("window.scrollBy(0, 500)")
-                page.wait_for_timeout(800)
+            last_height = 0
+            for attempt in range(8):
+                page.evaluate("window.scrollBy(0, 600)")
+                page.wait_for_timeout(1000)
+                new_height = page.evaluate("document.body.scrollHeight")
+                if new_height == last_height:
+                    break
+                last_height = new_height
 
             # Extract items
             _sync_state["progress"] = "商品データを抽出中..."
@@ -1292,7 +1350,7 @@ def _run_playwright_sync() -> dict:
             browser.close()
 
             if not items:
-                return {"error": "商品が見つかりませんでした。Mercari の持ち物一覧ページにログインしているか確認してください。"}
+                return {"error": "商品が見つかりませんでした。Cookie が有効で、Mercari の持ち物に商品があるか確認してください。"}
 
             _sync_state["progress"] = f"{len(items)} 件の商品が見つかりました。データベースに保存中..."
 
@@ -1309,9 +1367,23 @@ def _run_playwright_sync() -> dict:
         _sync_state["running"] = False
 
 
+class MercariSyncRequest(BaseModel):
+    cookie_str: str | None = None
+    items: list[dict] | None = None  # For JSON upload fallback
+
+
 @app.post("/api/scrapers/mercari/owned/sync")
-async def trigger_mercari_sync():
-    """Trigger server-side Mercari owned items sync using Playwright auto-login."""
+async def trigger_mercari_sync(req: MercariSyncRequest | None = None, request: Request | None = None):
+    """Trigger server-side Mercari owned items sync using Playwright with stealth + cookies, or accept pre-parsed items from JSON upload.
+
+    Auth: SSO cookie (for browser UI) OR X-API-Key header (for bookmarklet).
+    """
+    # API key check (for bookmarklet)
+    api_key_config = _get_bookmarklet_api_key()
+    if api_key_config:
+        api_key = request.headers.get("x-api-key", "") if request else ""
+        if not api_key or api_key != api_key_config:
+            raise HTTPException(status_code=403, detail="APIキーが無効です")
     if _sync_state["running"]:
         return {
             "status": "running",
@@ -1319,20 +1391,29 @@ async def trigger_mercari_sync():
             "message": "すでに同期が実行中です",
         }
 
-    # Run sync in background task
-    asyncio.create_task(_async_sync_wrapper())
+    cookie_str = req.cookie_str if req else None
+    items_payload = req.items if req else None
+
+    # JSON upload fallback: save pre-parsed items directly
+    if items_payload:
+        converted = [MercariOwnedItem(**item) for item in items_payload]
+        result = _save_items_to_db(converted)
+        return result
+
+    # Run Playwright sync in background task
+    asyncio.create_task(_async_sync_wrapper(cookie_str))
     return {
         "status": "started",
         "message": "同期を開始しました",
     }
 
 
-async def _async_sync_wrapper():
+async def _async_sync_wrapper(cookie_str: str | None = None):
     """Wrapper to run synchronous Playwright code in a thread pool."""
     import concurrent.futures
     loop = asyncio.get_event_loop()
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        result = await loop.run_in_executor(executor, _run_playwright_sync)
+        result = await loop.run_in_executor(executor, _run_playwright_sync, cookie_str)
     # Always store result for polling (success or error)
     _sync_state["result"] = result
 
@@ -1359,6 +1440,53 @@ async def mercari_owned_sync_status():
         "sync_result": _sync_state.get("result"),
         "sync_error": _sync_state.get("error"),
     }
+
+
+# ── Bookmarklet API Key Config ──────────────────────────
+_CONFIG_YAML = Path(__file__).parent / "config.yaml"
+
+def _load_config_yaml() -> dict:
+    if _CONFIG_YAML.exists():
+        with open(_CONFIG_YAML, "r") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+def _save_config_yaml(config: dict):
+    with open(_CONFIG_YAML, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+def _get_bookmarklet_api_key() -> str:
+    """Get API key from config.yaml, fall back to env var."""
+    config = _load_config_yaml()
+    key = config.get("bookmarklet_api_key", "")
+    return key or _INV_SYNC_API_KEY
+
+def _set_bookmarklet_api_key(key: str):
+    """Save API key to config.yaml."""
+    config = _load_config_yaml()
+    config["bookmarklet_api_key"] = key
+    _save_config_yaml(config)
+
+
+@app.get("/api/config/bookmarklet-api-key")
+async def get_bookmarklet_api_key():
+    """Get current bookmarklet API key (masked)."""
+    key = _get_bookmarklet_api_key()
+    # Return masked key for display
+    if key:
+        masked = key[:4] + "•" * min(len(key) - 4, 16) + ("…" if len(key) > 20 else "")
+    else:
+        masked = ""
+    return {"apiKey": key, "masked": masked}
+
+
+@app.put("/api/config/bookmarklet-api-key")
+async def set_bookmarklet_api_key(request: Request):
+    """Set bookmarklet API key."""
+    body = await request.json()
+    key = body.get("apiKey", "")
+    _set_bookmarklet_api_key(key)
+    return {"status": "updated", "apiKey": key}
 
 
 # ── Frontend ────────────────────────────────────────────

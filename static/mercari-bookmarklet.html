@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mercari 在庫同期ブックマークレット</title>
+<style>
+  :root { --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--text2:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--purple:#bc8cff;--radius:10px; }
+  * { margin:0;padding:0;box-sizing:border-box; }
+  body { font-family:-apple-system,'Hiragino Sans','Meiryo',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px; }
+  .container { max-width:700px;width:100%; }
+  h1 { font-size:22px;margin-bottom:8px;text-align:center; }
+  .subtitle { text-align:center;color:var(--text2);font-size:14px;margin-bottom:24px; }
+  .card { background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px; }
+  .card h3 { font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px; }
+  .steps { list-style:none;counter-reset:step; }
+  .steps li { counter-increment:step;padding:10px 0 10px 40px;position:relative;border-bottom:1px solid var(--border);font-size:14px;line-height:1.6; }
+  .steps li:last-child { border-bottom:none; }
+  .steps li::before { content:counter(step);position:absolute;left:8px;top:10px;width:24px;height:24px;background:var(--blue);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700; }
+  .bookmarklet-link { display:block;padding:16px;background:linear-gradient(135deg,#1a2332,#161b22);border:2px dashed var(--blue);border-radius:var(--radius);text-align:center;margin:12px 0;transition:.2s;cursor:grab;font-size:14px;color:var(--blue);word-break:break-all;text-decoration:none; }
+  .bookmarklet-link:hover { background:rgba(88,166,255,0.1);border-style:solid; }
+  .bookmarklet-link::before { content:"🔖 "; }
+  code { background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:13px; }
+  .note { font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5; }
+  .config { display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap; }
+  .config input { flex:1;min-width:200px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px; }
+  .btn { padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;transition:.15s; }
+  .btn:hover { background:var(--border); }
+  .btn-primary { background:var(--blue);color:#fff;border-color:var(--blue); }
+  .btn-primary:hover { opacity:.85; }
+  #bookmarklet-output { margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;max-height:120px;overflow-y:auto;color:var(--text2); }
+  .back-link { display:inline-block;margin-top:24px;color:var(--blue);font-size:13px;text-align:center; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🛍 Mercari 在庫同期ブックマークレット</h1>
+  <p class="subtitle">Mercari の出品ページでワンクリックして、在庫管理システムに自動同期</p>
+
+  <!-- Config -->
+  <div class="card">
+    <h3>⚙️ 設定</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Inventory Manager のサーバーアドレスを入力してください。</p>
+    <div class="config">
+      <input type="text" id="server-url" value="http://192.168.1.203:8080" placeholder="http://192.168.1.203:8080">
+    </div>
+    <p class="note">📌 Docker コンテナ内では 8080、リバースプロキシ経由では実際のURL（例: http://192.168.1.203）</p>
+  </div>
+
+  <!-- Steps -->
+  <div class="card">
+    <h3>📋 使い方</h3>
+    <ol class="steps">
+      <li><strong>Mercari にログイン</strong>して、<a href="https://jp.mercari.com/mypage/inventory" target="_blank" style="color:var(--blue)">持ち物一覧ページ</a>を開きます。</li>
+      <li>下の<strong>ブックマークリンク</strong>をマウスでドラッグして、ブラウザのブックマークバーにドロップします。<br><span class="note">またはリンクをクリック → Ctrl+D でブックマーク保存 → 名前「Mercari同期」、URL欄に自動入力されるのを確認。</span></li>
+      <li>持ち物一覧ページで<strong>ブックマークをクリック</strong>すると、自動的に商品データを抽出して Inventory Manager に送信します。</li>
+      <li>画面上に<strong>進捗表示</strong>がオーバーレイで表示され、完了すると「XX件同期完了」と表示されます。</li>
+    </ol>
+  </div>
+
+  <!-- Bookmarklet -->
+  <div class="card">
+    <h3>🔖 ブックマークレット（ドラッグしてブックマークバーに）</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:8px">下のリンクをマウスで掴んで、ブラウザのブックマークバーにドロップしてください。</p>
+    <a id="bm-link" class="bookmarklet-link" href="#">Mercari 在庫同期</a>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-primary" onclick="generateBookmarklet()">🔄 ブックマークレットを生成</button>
+      <button class="btn" onclick="copyBookmarkletURL()">📋 URLをコピー</button>
+    </div>
+    <div id="bookmarklet-output"></div>
+  </div>
+
+  <!-- Raw JS for reference -->
+  <div class="card">
+    <h3>💡 ヒントと注意点</h3>
+    <ul style="font-size:13px;color:var(--text2);line-height:1.8;padding-left:20px">
+      <li>Mercari と Inventory Manager が<strong>同じネットワーク</strong>（同じWi-Fi）に接続されている必要があります。</li>
+      <li>CORSはサーバー側で許可済みです。ブックマークバーから直接実行してください。</li>
+      <li>商品数が100件を超える場合、自動スクロールで全商品を取得します（数秒〜数十秒かかります）。</li>
+      <li>既に在庫にある商品は<strong>更新</strong>され、新しい商品は<strong>追加</strong>されます。</li>
+      <li>スマホではブックマークレットが使えない場合があります。その場合はPCから操作してください。</li>
+    </ul>
+  </div>
+
+  <a class="back-link" href="/">← Inventory Manager に戻る</a>
+</div>
+
+<script>
+function generateBookmarklet() {
+  const serverUrl = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
+
+ // The bookmarklet code - minified
+  const bmCode = `!function(){
+    var S=encodeURIComponent;
+    var C=decodeURIComponent;
+    var serverUrl="${serverUrl}";
+    var api=serverUrl+"/api/scrapers/mercari/owned/sync";
+
+    // Check we're on Mercari
+    if(!location.hostname.includes("mercari.com")){alert("Mercari.jpのページで実行してください");return;}
+
+    // Create overlay
+    var ov=document.createElement("div");
+    ov.id="mercari-sync-overlay";
+    ov.style.cssText="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;color:#e6edf3";
+    ov.innerHTML='<div style="text-align:center;padding:40px"><div id="ms-icon" style="font-size:48px;margin-bottom:16px">🔄</div><div id="ms-text" style="font-size:18px;font-weight:600">読み込み中...</div><div id="ms-sub" style="font-size:14px;color:#8b949e;margin-top:8px"></div></div>';
+    document.body.appendChild(ov);
+
+    var msText=document.getElementById("ms-text");
+    var msSub=document.getElementById("ms-sub");
+    var msIcon=document.getElementById("ms-icon");
+
+    function setStatus(icon,text,sub){msIcon.textContent=icon;msText.textContent=text;if(sub)msSub.textContent=sub;}
+
+    // Collect items from DOM
+    var items=[];
+    var seen=new Set();
+
+    function extractItems(){
+      items=[];seen.clear();
+      var allLinks=document.querySelectorAll('a[href*="/inventory/m"]');
+      for(var i=0;i<allLinks.length;i++){
+        var link=allLinks[i];
+        var href=link.getAttribute("href");
+        if(!href||seen.has(href)){continue;}
+
+        // Extract item ID from URL
+        var match=href.match(/\/inventory\/m(\d+)/);
+        if(!match) continue;
+        var itemId="m"+match[1];
+        seen.add(itemId);
+
+        // Walk up to find the card container
+        var card=link.closest("[data-item-id], [class*='Card'], [class*='item'], article, div[class]");
+        if(!card) card=link.parentElement;
+
+        // Get name
+        var name="";
+        var nameEl=card.querySelector('[class*="title"], [class*="Title"], [class*="name"], h3, h4, p');
+        if(nameEl) name=nameEl.textContent.trim();
+        if(!name){var txts=card.querySelectorAll('*');for(var t=0;t<txts.length&&txts.length<20;t++){if(txts[t].children.length===0){var n=txts[t].textContent.trim();if(n.length>3&&n.length<100&&!n.includes('¥')&&!n.match(/^[0-9,]+$/)){name=n;break;}}}}
+
+        // Get price
+        var price=0;
+        var priceEl=card.querySelector('[class*="price"], [class*="Price"]');
+        if(priceEl){var ptxt=priceEl.textContent.trim();var pm=ptxt.match(/¥\\s*(\\d[,\\d]*)/);if(pm)price=parseInt(pm[1].replace(/,/g,''));}
+        if(!price){var allP=card.querySelectorAll('*');for(var pi=0;pi<allP.length&&pi<30;pi++){var pt=allP[pi].textContent.trim();var pmatch=pt.match(/^(¥\\s*)?(\\d[,\\d]+)$/);if(pmatch&&parseInt(pmatch[2].replace(/,/g,''))>0){price=parseInt(pmatch[2].replace(/,/g,''));break;}}}
+
+        // Get status
+        var status="";
+        var statusEl=card.querySelector('[class*="status"], [class*="Status"], [class*="badge"], span[class]');
+        if(statusEl) status=statusEl.textContent.trim();
+        if(!status){var sts=["出品中","出品停止","在庫切れ","販売中","出品する"];for(var si=0;si<sts.length;si++){if(card.textContent.includes(sts[si])){status=sts[si];break;}}}
+
+        // Get image
+        var imageUrl="";
+        var imgEl=card.querySelector('img');
+        if(imgEl){imageUrl=imgEl.getAttribute("src")||imgEl.getAttribute("data-src")||imgEl.getAttribute("data-lazy-src")||imgEl.getAttribute("data-original")||"";}
+
+        var fullUrl="https://jp.mercari.com/inventory/"+itemId;
+
+        if(name.length>=2&&price>0){
+          items.push({name:name,price:price,status:status,url:fullUrl,image_url:imageUrl});
+        }
+      }
+    }
+
+    // Scroll to load all items (infinite scroll)
+    function scrollLoad(){
+      return new Promise(function(resolve){
+        var done=false;
+        var lastCount=0;
+        var maxScrolls=50;
+        var scrollNum=0;
+
+        function doScroll(){
+          if(done)return;
+          extractItems();
+          var curCount=items.length;
+
+          if(curCount===lastCount&&scrollNum>3){done=true;resolve();return;}
+          if(scrollNum>=maxScrolls){done=true;resolve();return;}
+          if(lastCount>0&&curCount===lastCount){setTimeout(function(){doScroll();},500);return;}
+
+          lastCount=curCount;
+          scrollNum++;
+          setStatus("🔄","商品を読み込み中...",""+items.length+"件取得 ("+scrollNum+"/" + maxScrolls+")");
+
+          var target=Math.random()*window.innerHeight+window.scrollY;
+          window.scrollTo(0,target);
+          setTimeout(function(){doScroll();},400);
+        }
+        doScroll();
+      });
+    }
+
+    // Main execution
+    (async function(){
+      try{
+        // Wait for initial load
+        setStatus("⏳","Mercariの商品を読み込み中...","ページが読み込まれるのを待っています");
+        var maxWait=30;
+        var waited=0;
+        while(waited<maxWait){
+          extractItems();
+          if(items.length>0)break;
+          await new Promise(function(r){setTimeout(r,500);});
+          waited++;
+        }
+
+        if(items.length===0){
+          setStatus("⚠️","商品が見つかりません","Mercariの持ち物ページで実行してください");
+          setTimeout(function(){document.body.removeChild(ov);},3000);
+          return;
+        }
+
+        // Scroll to load more
+        setStatus("🔄","全商品の読み込み中...",""+items.length+"件取得済み");
+        await scrollLoad();
+
+        var total=items.length;
+        setStatus("📤",total+"件の商品を同期中...","Inventory Managerに送信しています");
+
+        // Send to server via fetch (CORS allowed) with fallback
+        var result=null;
+        var error=null;
+        try{
+          var resp=await fetch(api,{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({items:items})
+          });
+          if(resp.ok){result=await resp.json();}
+          else{error="HTTP "+resp.status+" - "+resp.statusText;}
+        }catch(fe){
+          // Fallback: hidden form POST (bypasses CORS)
+          try{
+            var f=document.createElement("form");
+            f.method="POST";f.action=api;f.target="_blank";
+            f.style.display="none";
+            var t=document.createElement("textarea");
+            t.name="items_json";t.value=JSON.stringify({items:items});
+            f.appendChild(t);
+            document.body.appendChild(f);
+            f.submit();
+            document.body.removeChild(f);
+            error="フォーム送信しました。新しいタブで結果を確認してください。";
+          }catch(fe2){
+            // Last resort: copy to clipboard
+            try{
+              await navigator.clipboard.writeText(JSON.stringify({items:items}));
+              error="クリップボードにコピーしました。Inventory ManagerのJSONインポートから貼り付けてください。";
+            }catch(fe3){
+              error="送信エラー: "+fe.message;
+            }
+          }
+        }
+
+        if(result){
+          var created=result.created||0;
+          var updated=result.updated||0;
+          var skipped=result.skipped||0;
+          setStatus("✅",total+"件同期完了！","新規:"+created+" 更新:"+updated+" スキップ:"+skipped);
+          msText.style.color="#3fb950";
+        }else if(error&&error.includes("クリップボード")){
+          setStatus("📋",error,"");
+          msText.style.color="#d29922";
+        }else if(error&&error.includes("タブ")){
+          setStatus("🔗","新しいタブで処理中...","結果は新しいタブで確認できます");
+          msText.style.color="#58a6ff";
+        }else{
+          setStatus("❌","エラー: "+(error||"不明"),"再度お試しください");
+          msText.style.color="#f85149";
+        }
+
+        setTimeout(function(){document.body.removeChild(ov);},result?5000:8000);
+      }catch(e){
+        setStatus("❌","エラー: "+e.message,"");
+        msText.style.color="#f85149";
+        setTimeout(function(){document.body.removeChild(ov);},5000);
+      }
+    })();
+  }()`;
+
+  // Generate the bookmarklet URL
+  var bmUrl = 'javascript:' + S(bmCode) + ';void(0);';
+  var link = document.getElementById('bm-link');
+  link.href = bmUrl;
+  link.textContent = '🔖 Mercari 在庫同期（ドラッグしてブックマークバーに）';
+
+  document.getElementById('bookmarklet-output').textContent = bmUrl;
+}
+
+function copyBookmarkletURL() {
+  var output = document.getElementById('bookmarklet-output');
+  if (!output.textContent) { generateBookmarklet(); }
+  navigator.clipboard.writeText(output.textContent).then(function() {
+    alert('ブックマークレットのURLをコピーしました！');
+  }).catch(function() {
+    // Fallback
+    var ta = document.createElement('textarea');
+    ta.value = output.textContent;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('ブックマークレットのURLをコピーしました！');
+  });
+}
+
+// Generate on load with default server URL
+generateBookmarklet();
+</script>
+</body>
+</html>

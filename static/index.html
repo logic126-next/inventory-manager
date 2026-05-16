@@ -125,6 +125,9 @@ tr:hover td { background: var(--bg3); }
 .disc-card .disc-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .disc-card.selected { border-color: var(--blue); background: rgba(88,166,255,0.05); }
 input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; }
+
+/* Toast */
+@keyframes fadeInUp { from { opacity:0; transform:translateX(-50%) translateY(20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
 </style>
 </head>
 <body>
@@ -154,6 +157,16 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     <input type="text" id="inv-search" placeholder="🔍 商品名で検索...">
     <select id="inv-status"><option value="">全状態</option></select>
     <select id="inv-platform"><option value="">全平台</option><option value="mercari">Mercari</option><option value="amazon_outlet">Amazon</option><option value="other">その他</option></select>
+    <select id="inv-sort">
+      <option value="">新着順</option>
+      <option value="created_at_asc">古い順</option>
+      <option value="purchase_price_asc">購入額: 安い順</option>
+      <option value="purchase_price_desc">購入額: 高い順</option>
+      <option value="sale_price_asc">売価: 安い順</option>
+      <option value="sale_price_desc">売価: 高い順</option>
+      <option value="profit_asc">利益: 低い順</option>
+      <option value="profit_desc">利益: 高い順</option>
+    </select>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <span id="inv-count" style="font-size:13px;color:var(--text2)"></span>
@@ -219,61 +232,42 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
 
 <!-- ════════ Sync ════════ -->
 <div id="page-sync" class="page">
-  <div class="card">
-    <h3 style="margin-bottom:8px">🔄 Mercari 持ち物同期</h3>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Playwright で自動ログインし、Mercari の「持ち物一覧」ページから商品データをサーバー側で取得して在庫に同期します。</p>
+  <!-- Bookmarklet Section -->
+  <div class="card" style="border-color:var(--blue);background:rgba(88,166,255,0.03)">
+    <h3 style="margin-bottom:8px">🔖 ブックマークレット</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">Mercari のブラウザでワンクリック！Cookie 不要、Playwright 不要。</p>
 
-    <!-- Credentials Status -->
-    <div style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:20px">🔑</span>
-        <strong style="color:var(--text)">認証情報ステータス</strong>
-      </div>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.6">
-        サーバーの .env ファイルに <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">MERCARI_EMAIL</code> と <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">MERCARI_PASSWORD</code> が設定されている必要があります。
-      </p>
-      <div id="credentials-status" style="font-size:13px;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
-        <span style="color:var(--text2)">確認中...</span>
-      </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <a id="bookmarklet-link" class="btn btn-primary" href="#" style="text-decoration:none;word-break:break-all;font-size:12px;padding:10px 14px">🔖 Mercari在庫同期（ブックマークバーにドラッグ）</a>
     </div>
 
-    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
-
-    <!-- Sync Now -->
-    <div style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:20px">🔄</span>
-        <strong style="color:var(--text)">同期実行</strong>
-      </div>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:10px">ボタンを押してサーバー側で Mercari に自動ログインし、商品データを取得します。</p>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-primary" id="btn-sync-now" onclick="triggerMercariSync()">🔄 今すぐ同期</button>
-        <button class="btn" onclick="checkSyncStatus()">📊 同期状況</button>
-      </div>
-      <div id="sync-progress-area" style="margin-top:10px;display:none">
-        <div id="sync-progress-text" style="font-size:13px;color:var(--blue)"></div>
-        <div class="stat-grid" id="sync-stats" style="margin-top:10px;display:none"></div>
-      </div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-bottom:12px">
+      <strong style="color:var(--text)">使い方：</strong>
+      <ol style="padding-left:20px;margin-top:6px">
+        <li>Mercari にログインし、<a href="https://jp.mercari.com/mypage/inventory" target="_blank" style="color:var(--blue)">持ち物一覧ページ</a>を開く</li>
+        <li>上のリンクを<strong>ブックマークバーにドラッグ＆ドロップ</strong></li>
+        <li>同じ Mercari 持ち物ページで、ブックマークをクリック</li>
+        <li>自動的に商品データを抽出・送信 → 「XX件同期完了」と表示される</li>
+      </ol>
     </div>
 
-    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
-
-    <!-- Fallback: JSON Upload -->
-    <div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:20px">📂</span>
-        <strong style="color:var(--text)">手動インポート（JSON ファイル）</strong>
-      </div>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:10px">自動ログインが使えない場合のフォールバック。既存の JSON ファイルをアップロードしてください。</p>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn" onclick="openJsonUpload()">📂 JSON ファイルをアップロード</button>
-        <input type="file" id="sync-file-input" accept=".json" style="display:none" onchange="handleJsonUpload(event)">
-      </div>
-      <div id="sync-status" style="display:none;margin-top:12px">
-        <div class="stat-grid" id="sync-stats"></div>
-        <div id="sync-progress" style="margin-top:12px"></div>
-      </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm" onclick="copyBookmarkletURL()">📋 URLをコピー</button>
+      <a class="btn btn-sm" href="/static/mercari-bookmarklet.html" target="_blank">📖 詳細ページ</a>
     </div>
+
+    <p style="font-size:11px;color:var(--text2);margin-top:10px">💡 サーバーアドレス変更が必要な場合は、<code style="background:var(--bg3);padding:1px 4px;border-radius:3px">/static/mercari-bookmarklet.html</code> にアクセスして設定してください。</p>
+  </div>
+
+  <!-- API Key Section -->
+  <div class="card" style="border-color:var(--yellow);background:rgba(210,153,34,0.03)">
+    <h3 style="margin-bottom:8px">🔑 ブックマークレット API キー</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">API キーを設定すると、ブックマークレットからの同期に認証が必要になります。未設定の場合は SSO 認証のみ。</p>
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <input type="text" id="api-key-input" placeholder="API キーを入力（空で無効化）" style="flex:1;min-width:200px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+      <button class="btn btn-primary btn-sm" onclick="saveBookmarkletApiKey()">💾 保存</button>
+    </div>
+    <div id="api-key-status" style="font-size:12px;color:var(--text2)"></div>
   </div>
 
   <!-- Synced items list -->
@@ -283,7 +277,6 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     <div id="sync-items-list" style="margin-top:8px"></div>
     <div style="margin-top:8px;display:flex;gap:8px">
       <button class="btn btn-sm" onclick="loadSyncItems()">🔄 更新</button>
-      <button class="btn btn-sm" onclick="checkSyncStatus()">📊 詳細</button>
     </div>
   </div>
 </div>
@@ -374,7 +367,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.page === 'dashboard') loadDashboard();
     if (tab.dataset.page === 'inventory') loadInventory();
     if (tab.dataset.page === 'profit') loadProfit();
-    if (tab.dataset.page === 'sync') { loadSyncItems(); checkCredentials(); }
+    if (tab.dataset.page === 'sync') { loadSyncItems(); loadCookieStatus(); }
   });
 });
 
@@ -447,11 +440,13 @@ async function loadInventory() {
   const search = document.getElementById('inv-search').value;
   const status = document.getElementById('inv-status').value;
   const platform = document.getElementById('inv-platform').value;
+  const sort = document.getElementById('inv-sort').value;
 
   const params = new URLSearchParams({ page: invPage, per_page: 50 });
   if (search) params.set('search', search);
   if (status) params.set('status', status);
   if (platform) params.set('platform', platform);
+  if (sort) params.set('sort', sort);
 
   try {
     const data = await api('/api/items?' + params.toString());
@@ -498,6 +493,7 @@ document.getElementById('inv-search').addEventListener('input', () => {
 });
 document.getElementById('inv-status').addEventListener('change', () => { invPage = 1; loadInventory(); });
 document.getElementById('inv-platform').addEventListener('change', () => { invPage = 1; loadInventory(); });
+document.getElementById('inv-sort').addEventListener('change', () => { invPage = 1; loadInventory(); });
 
 // Add item
 function showAddItemModal() {
@@ -715,11 +711,113 @@ async function loadProfit() {
   } catch(e) { console.error(e); }
 }
 
+// ── Bookmarklet ──────────────────────────────────────
+const BOOKMARKLET_SERVER = 'http://192.168.1.203:8080';
+var BOOKMARKLET_API_KEY = '';
+
+async function loadBookmarkletApiKey() {
+  try {
+    const data = await api('/api/config/bookmarklet-api-key');
+    BOOKMARKLET_API_KEY = data.apiKey || '';
+  } catch(e) { console.error(e); }
+}
+
+async function generateBookmarkletCode() {
+  try {
+    // Read bookmarklet.js and encode it
+    const resp = await fetch(API + '/static/bookmarklet.js');
+    const raw = await resp.text();
+    // Replace placeholders with actual values
+    const js = raw
+      .replace(/IM_URL_PLACEHOLDER/g, BOOKMARKLET_SERVER)
+      .replace(/IM_API_KEY_PLACEHOLDER/g, BOOKMARKLET_API_KEY);
+    return 'javascript:' + encodeURIComponent(js);
+  } catch(e) {
+    console.error('Bookmarklet generation failed:', e);
+    // Fallback: return a direct link to the bookmarklet page
+    return '#';
+  }
+}
+
+async function initBookmarklet() {
+  var link = document.getElementById('bookmarklet-link');
+  if (!link) return;
+  var url = await generateBookmarkletCode();
+  link.href = url;
+  link.title = 'ブックマークバーにドラッグして保存';
+}
+
+function copyBookmarkletURL() {
+  var url = generateBookmarkletCode();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(function() {
+      showToast('✅ ブックマークレットのURLをコピーしました', 'success');
+    }).catch(function() { fallbackCopy(url); });
+  } else { fallbackCopy(url); }
+}
+
+function fallbackCopy(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+  document.body.removeChild(ta);
+  showToast('✅ ブックマークレットのURLをコピーしました', 'success');
+}
+
+// ── Bookmarklet API Key ────────────────────────────
+async function loadBookmarkletApiKeyUI() {
+  try {
+    const data = await api('/api/config/bookmarklet-api-key');
+    BOOKMARKLET_API_KEY = data.apiKey || '';
+    var input = document.getElementById('api-key-input');
+    var status = document.getElementById('api-key-status');
+    if (input) input.value = BOOKMARKLET_API_KEY;
+    if (status) {
+      status.textContent = BOOKMARKLET_API_KEY ? '🟢 API キーは設定済み' : '🔴 API キー未設定（SSO 認証のみ）';
+      status.style.color = BOOKMARKLET_API_KEY ? 'var(--green)' : 'var(--yellow)';
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function saveBookmarkletApiKey() {
+  var input = document.getElementById('api-key-input');
+  var status = document.getElementById('api-key-status');
+  var key = input ? input.value.trim() : '';
+  try {
+    await api('/api/config/bookmarklet-api-key', {
+      method: 'PUT',
+      body: JSON.stringify({ apiKey: key })
+    });
+    BOOKMARKLET_API_KEY = key;
+    status.textContent = key ? '🟢 API キーは設定済み' : '🔴 API キー未設定（SSO 認証のみ）';
+    status.style.color = key ? 'var(--green)' : 'var(--yellow)';
+    showToast('✅ API キーを保存しました', 'success');
+    // Regenerate bookmarklet with new key
+    initBookmarklet();
+  } catch(e) {
+    showToast('❌ 保存に失敗しました', 'error');
+  }
+}
+
+// ── Toast notification helper ────────────────────────
+function showToast(msg, type) {
+  var existing = document.getElementById('toast-msg');
+  if (existing) existing.remove();
+  var t = document.createElement('div');
+  t.id = 'toast-msg';
+  t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:13px;z-index:9999;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.3);animation:fadeInUp .3s';
+  t.style.background = type === 'success' ? 'var(--green)' : type === 'error' ? 'var(--red)' : 'var(--blue)';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function() { if (t.parentNode) t.remove(); }, 3000);
+}
+
 // ── Init ─────────────────────────────────────────
 loadDashboard();
 initInventory();
 loadSyncItems();
 loadCookieStatus();
+initBookmarklet();
 
 // ══════════════════════════════════════════════════
 // DISCOVERY (Scraper Integration)
@@ -878,36 +976,59 @@ document.getElementById('disc-price-max').addEventListener('change', () => { dis
 // ══════════════════════════════════════════════════
 let _syncPollTimer = null;
 
-// ── Credentials check ────────────────────────────────
-async function checkCredentials() {
+// ── Cookie management ────────────────────────────────
+async function loadCookieStatus() {
+  const el = document.getElementById("cookie-status");
+  if (!el) return;
   try {
-    const data = await api('/api/settings/mercari-credentials/status');
-    const statusEl = document.getElementById('credentials-status');
-    if (data.has_email && data.has_password) {
-      statusEl.innerHTML = `<span style="color:var(--green)">✅ メールアドレス・パスワード設定済み (${data.email_masked})</span>`;
-    } else if (data.has_email) {
-      statusEl.innerHTML = '<span style="color:var(--yellow)">⚠️ メールアドレスは設定済みですが、パスワードが未設定です</span>';
-    } else if (data.has_password) {
-      statusEl.innerHTML = '<span style="color:var(--yellow)">⚠️ パスワードは設定済みですが、メールアドレスが未設定です</span>';
+    const r = await fetch("/api/settings/mercari-cookie/status");
+    const d = await r.json();
+    if (d.has_cookie) {
+      el.innerHTML = `<span style="color:var(--green)">✅ Cookie が設定されています (${d.cookie_length}文字)</span>`;
+      document.getElementById("mercari-cookie-input").value = ""; // Clear textarea for security
     } else {
-      statusEl.innerHTML = '<span style="color:var(--red)">❌ メールアドレス・パスワードが未設定です。サーバーの .env に MERCARI_EMAIL と MERCARI_PASSWORD を設定してください。</span>';
+      el.innerHTML = `<span style="color:var(--yellow)">⚠️ Cookie が設定されていません</span>`;
     }
-  } catch(e) {
-    document.getElementById('credentials-status').innerHTML = '<span style="color:var(--text2)">確認できませんでした</span>';
+  } catch {
+    el.innerHTML = `<span style="color:var(--yellow)">⚠️ サーバーと通信できません</span>`;
   }
 }
 
-// ── Legacy cookie functions (no-op, kept for compat) ──
 async function saveMercariCookie() {
-  alert('Cookie 方式は非推奨です。MERCARI_EMAIL と MERCARI_PASSWORD を .env に設定してください。');
+  const input = document.getElementById("mercari-cookie-input");
+  const val = input.value.trim();
+  if (!val) {
+    alert("Cookie を入力してください");
+    return;
+  }
+  try {
+    const r = await fetch("/api/settings/mercari-cookie", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cookie_str: val }),
+    });
+    const d = await r.json();
+    if (d.error) {
+      alert("エラー: " + d.error);
+    } else {
+      input.value = ""; // Clear for security
+      loadCookieStatus();
+      showToast("✅ Cookie を保存しました", "success");
+    }
+  } catch (e) {
+    alert("Cookie の保存に失敗しました: " + e.message);
+  }
 }
 
 async function deleteMercariCookie() {
-  alert('Cookie 方式は非推奨です。');
-}
-
-async function loadCookieStatus() {
-  checkCredentials();
+  if (!confirm("保存された Cookie を削除しますか？")) return;
+  try {
+    await fetch("/api/settings/mercari-cookie", { method: "DELETE" });
+    loadCookieStatus();
+    showToast("🗑 Cookie を削除しました", "info");
+  } catch (e) {
+    alert("Cookie の削除に失敗しました: " + e.message);
+  }
 }
 
 // ── Trigger sync ───────────────────────────────────────
@@ -916,6 +1037,10 @@ async function triggerMercariSync() {
   const progressArea = document.getElementById('sync-progress-area');
   const progressText = document.getElementById('sync-progress-text');
   const statsEl = document.getElementById('sync-stats');
+
+  // Check if cookie is provided in textarea or saved on server
+  const cookieInput = document.getElementById('mercari-cookie-input');
+  let cookieStr = cookieInput.value.trim();
 
   btn.disabled = true;
   btn.textContent = '⏳ 同期中...';
@@ -929,7 +1054,9 @@ async function triggerMercariSync() {
   }
 
   try {
-    await api('/api/scrapers/mercari/owned/sync', { method: 'POST' });
+    const body = {};
+    if (cookieStr) body.cookie_str = cookieStr;
+    await api('/api/scrapers/mercari/owned/sync', { method: 'POST', body: JSON.stringify(body) });
 
     // Poll for status
     _syncPollTimer = setInterval(async () => {

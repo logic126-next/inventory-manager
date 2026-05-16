@@ -19,7 +19,6 @@ PUBLIC_PATHS: set[str] = {
     '/favicon.ico',
     '/robots.txt',
     '/api/services',
-    '/api/scrapers/mercari/owned/sync',
 }
 
 PUBLIC_PREFIXES: tuple[str, ...] = (
