@@ -97,20 +97,34 @@ function generateBookmarklet() {
     var seen=new Set();
 
     function parseDate(text){
-      var m=text.match(/(\\d{4})年(\\d{1,2})月(\\d{1,2})日/);
+      // Mercari購入履歴 format: "2026/02/11 21:01" or "2026/2/11"
+      var m=text.match(/(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/);
       if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
-      m=text.match(/(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/);
+      m=text.match(/(\\d{4})年(\\d{1,2})月(\\d{1,2})日/);
       if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
       m=text.match(/(\\d{1,2})月(\\d{1,2})日/);
-      if(m){var y=new Date().getFullYear();return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}
-      // Mercari購入履歴 format: "3/10" or "5/15"
-      m=text.match(/(\\d{1,2})\\/(\\d{1,2})$/);
       if(m){var y=new Date().getFullYear();return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}
       return null;
     }
 
     function extractItems(){
       items=[];seen.clear();
+      // Strategy: find all date stamps first, then match with items
+      // Mercari購入履歴 shows dates like "2026/02/11 21:01"
+      var allText=document.body.innerText;
+      var dateMatches=[];
+      var dm;
+      while((dm=/(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/.exec(allText))!==null){
+        var d=dm[1]+"-"+dm[2].padStart(2,"0")+"-"+dm[3].padStart(2,"0");
+        // Only keep dates in 2025-2027 range
+        if(dm[1]>="2025"&&dm[1]<="2027")dateMatches.push(d);
+      }
+      // Deduplicate adjacent duplicates
+      var dates=[];
+      for(var di=0;di<dateMatches.length;di++){
+        if(di===0||dateMatches[di]!==dateMatches[di-1])dates.push(dateMatches[di]);
+      }
+
       var imgs=document.querySelectorAll("img");
       for(var i=0;i<imgs.length;i++){
         var img=imgs[i];
@@ -132,7 +146,12 @@ function generateBookmarklet() {
         var price=0;
         var pm=ct.match(/\\u00a5\\s*(\\d[\\d,]*)/g);
         if(pm){for(var pi=0;pi<pm.length;pi++){var pv=parseInt(pm[pi].replace(/[^0-9]/g,""));if(pv>=100&&pv<=9999999){price=pv;break;}}}
+        // Try to get date from parent, fallback to sequential date list
         var purchaseDate=parseDate(ct);
+        if(!purchaseDate&&dates.length>0){
+          // Use the first date as fallback (items are shown newest first)
+          purchaseDate=dates[Math.min(items.length,dates.length-1)];
+        }
         var link=parent.querySelector("a");
         var fullUrl="";
         if(link){var href=link.getAttribute("href");if(href)fullUrl=href.startsWith("https://")?href:"https://jp.mercari.com"+href;}
