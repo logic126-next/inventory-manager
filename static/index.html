@@ -277,6 +277,21 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     <div id="api-key-status" style="font-size:12px;color:var(--text2)"></div>
   </div>
 
+  <!-- Cookie Config Section -->
+  <div class="card" style="border-color:var(--orange);background:rgba(251,146,60,0.03)">
+    <h3 style="margin-bottom:8px">🍪 Mercari Cookie 設定</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">
+      Mercari 持ち物・購入履歴の同期にログイン Cookie が必要です。<br>
+      <strong>取得方法：</strong>Mercari にログイン後、ブラウザ DevTools → Application → Cookies → <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">_session_id</code> の値をコピー。<br>
+      または <a href="https://jp.mercari.com/mypage/inventory" target="_blank" style="color:var(--orange)">持ち物ページ</a> の DevTools Console で <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">document.cookie</code> を実行して結果をコピー。
+    </p>
+    <textarea id="mercari-cookie-input" placeholder="Cookie を貼り付けてください..." rows="3" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;resize:vertical;margin-bottom:8px;font-family:monospace"></textarea>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="saveMercariCookie()">💾 Cookie を保存</button>
+      <span id="cookie-status" style="font-size:12px;color:var(--text2)"></span>
+    </div>
+  </div>
+
   <!-- Image Cache Section -->
   <div class="card" style="border-color:var(--green);background:rgba(16,185,129,0.03)">
     <h3 style="margin-bottom:8px">🖼️ 画像をDBにキャッシュ</h3>
