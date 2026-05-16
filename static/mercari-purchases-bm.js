@@ -1,19 +1,21 @@
 (function() {
   'use strict';
 
-  var scriptTag = document.currentScript || (function() {
-    var scripts = document.getElementsByTagName('script');
-    for (var i = scripts.length - 1; i >= 0; i--) {
-      if (scripts[i].src && scripts[i].src.indexOf('mercari-purchases-bm.js') >= 0) {
-        return scripts[i];
-      }
+  // Get server URL from script src
+  var scriptTag = null;
+  var scripts = document.getElementsByTagName('script');
+  for (var i = scripts.length - 1; i >= 0; i--) {
+    if (scripts[i].src && scripts[i].src.indexOf('mercari-purchases-bm.js') >= 0) {
+      scriptTag = scripts[i];
+      break;
     }
-    return null;
-  })();
+  }
 
   var serverUrl = '';
   if (scriptTag && scriptTag.src) {
-    serverUrl = scriptTag.src.replace('/static/mercari-purchases-bm.js', '');
+    // e.g. https://192.168.1.203/inventory/static/mercari-purchases-bm.js
+    // → https://192.168.1.203/inventory
+    serverUrl = scriptTag.src.replace(/\/static\/mercari-purchases-bm\.js$/, '');
   }
 
   var api = serverUrl + '/api/scrapers/mercari/purchases/sync';
@@ -43,12 +45,10 @@
   var seen = new Set();
 
   function parseDate(text) {
-    // Try to parse Japanese dates: 2025年1月15日, 2025/01/15, 1月15日
     var m = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
     if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
     m = text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
     if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
-    // If no year, assume current year
     m = text.match(/(\d{1,2})月(\d{1,2})日/);
     if (m) {
       var year = new Date().getFullYear();
@@ -72,7 +72,6 @@
 
       var ct = parent.textContent.trim();
 
-      // Extract name - first meaningful text node
       var name = '';
       var txts = parent.querySelectorAll('*');
       for (var t = 0; t < txts.length && t < 20; t++) {
@@ -88,7 +87,6 @@
       if (!name || seen.has(name)) continue;
       seen.add(name);
 
-      // Extract price - find price-like numbers
       var price = 0;
       var pm = ct.match(/¥\s*(\d[\d,]*)/g);
       if (pm) {
@@ -101,7 +99,6 @@
         }
       }
 
-      // Extract purchase date
       var purchaseDate = parseDate(ct);
 
       var link = parent.querySelector('a');
@@ -156,8 +153,8 @@
 
     if (items.length === 0) {
       setStatus('\u26a0\ufe0f', '商品が見つかりませんでした',
-        'img: ' + document.querySelectorAll('img').length + '件');
-      setTimeout(function() { document.body.removeChild(ov); }, 5000);
+        'img: ' + document.querySelectorAll('img').length + '件 / server: ' + serverUrl + ' / api: ' + api);
+      setTimeout(function() { document.body.removeChild(ov); }, 8000);
       return;
     }
 
@@ -170,12 +167,17 @@
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
       if (xhr.status === 0) {
-        setStatus('\u274c', 'ネットワークエラー', 'サーバーに接続できません。');
+        setStatus('\u274c', 'ネットワークエラー', 'API: ' + api);
         setTimeout(function() { document.body.removeChild(ov); }, 8000);
         return;
       }
       try {
         var resp = JSON.parse(xhr.responseText);
+        if (resp.detail) {
+          setStatus('\u274c', 'APIエラー', resp.detail + '\n' + api);
+          setTimeout(function() { document.body.removeChild(ov); }, 8000);
+          return;
+        }
         if (resp.error) {
           setStatus('\u274c', 'エラー', resp.error);
           setTimeout(function() { document.body.removeChild(ov); }, 8000);
@@ -185,16 +187,16 @@
           (resp.created || 0) + '件新規 / ' + (resp.updated || 0) + '件更新 / ' + (resp.skipped || 0) + '件スキップ');
         setTimeout(function() { document.body.removeChild(ov); }, 5000);
       } catch (e) {
-        setStatus('\u274c', 'エラー', '' + e.message);
-        setTimeout(function() { document.body.removeChild(ov); }, 5000);
+        setStatus('\u274c', 'エラー', '' + e.message + '\nResponse: ' + xhr.responseText.substring(0, 200));
+        setTimeout(function() { document.body.removeChild(ov); }, 8000);
       }
     };
     xhr.onerror = function() {
-      setStatus('\u274c', 'ネットワークエラー', 'サーバーに接続できません。');
+      setStatus('\u274c', 'ネットワークエラー', 'API: ' + api);
       setTimeout(function() { document.body.removeChild(ov); }, 8000);
     };
     xhr.ontimeout = function() {
-      setStatus('\u23f1\ufe0f', 'タイムアウト', 'サーバーの応答がありません。');
+      setStatus('\u23f1\ufe0f', 'タイムアウト', 'API: ' + api);
       setTimeout(function() { document.body.removeChild(ov); }, 8000);
     };
     xhr.send(JSON.stringify({ items: items }));
