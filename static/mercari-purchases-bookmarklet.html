@@ -39,7 +39,7 @@
     <h3>⚙️ 設定</h3>
     <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Inventory Manager のサーバーアドレスを入力してください。</p>
     <div class="config">
-      <input type="text" id="server-url" placeholder="http://192.168.1.203:8080">
+      <input type="text" id="server-url" placeholder="https://192.168.1.203/inventory">
     </div>
   </div>
 
@@ -75,9 +75,13 @@ document.getElementById('server-url').value = serverUrl + base;
 function generateBookmarklet() {
   const url = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
 
-  // Write bookmarklet to external file and load it
-  var bmJs = document.getElementById('bm-link').href;
-  var bmCode = '(function(){var s=document.createElement("script");s.src="' + url + '/static/mercari-purchases-bm.js";document.body.appendChild(s);})()';
+  // Set global variable BEFORE loading the script
+  var bmCode = '(function(){';
+  bmCode += 'window.__MERCARI_SERVER_URL="' + url + '";';
+  bmCode += 'var s=document.createElement("script");';
+  bmCode += 's.src="' + url + '/static/mercari-purchases-bm.js?v="+(new Date()).getTime();';
+  bmCode += 'document.body.appendChild(s);';
+  bmCode += '})();';
 
   const encoded = 'javascript:' + encodeURIComponent(bmCode);
   document.getElementById('bm-link').href = encoded;
@@ -86,15 +90,8 @@ function generateBookmarklet() {
 
 function copyBookmarkletURL() {
   const link = document.getElementById('bm-link');
-  if (link.href === '#') {
-    alert('まず「🔄 生成」ボタンをクリックしてください');
-    return;
-  }
-  navigator.clipboard.writeText(link.href).then(function() {
-    alert('クリップボードにコピーしました');
-  }).catch(function() {
-    prompt('URL をコピーしてください：', link.href);
-  });
+  if (link.href === '#') { alert('まず「🔄 生成」ボタンをクリックしてください'); return; }
+  navigator.clipboard.writeText(link.href).then(function() { alert('クリップボードにコピーしました'); }).catch(function() { prompt('URL をコピーしてください：', link.href); });
 }
 
 // Auto-generate on page load
