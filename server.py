@@ -1343,11 +1343,50 @@ def _save_purchases_to_db(items: list[MercariOwnedItem]) -> dict:
             source_url = item.url
             image_url = item.image_url
 
-            # Try to match against mercari_owned items by name (fuzzy)
+            # Try to match against mercari_owned items by name
+            # owned names may have price appended (e.g. ¥6,300), so strip price first
+            purchase_name = name.lower().strip()
+            
+            # First: exact match
             owned = conn.execute(
-                "SELECT id FROM items WHERE name = ? AND source_platform = 'mercari_owned'",
+                "SELECT id, name FROM items WHERE name = ? AND source_platform = 'mercari_owned'",
                 (name,),
             ).fetchone()
+
+            if not owned:
+                # Fuzzy match: load all owned items and compare
+                all_owned = conn.execute(
+                    "SELECT id, name FROM items WHERE source_platform = 'mercari_owned'"
+                ).fetchall()
+                best_match = None
+                best_score = 0
+                for o in all_owned:
+                    owned_name = o["name"].lower().strip()
+                    # Remove price suffix (¥...) from owned name
+                    owned_no_price = owned_name.rsplit("¥", 1)[0].strip()
+                    
+                    if owned_no_price == purchase_name:
+                        # Perfect match after stripping price
+                        best_match = o
+                        best_score = 1.0
+                        break
+                    if purchase_name == owned_name:
+                        best_match = o
+                        best_score = 1.0
+                        break
+                    # Check containment (one is substring of the other)
+                    if len(purchase_name) >= 4 and len(owned_name) >= 4:
+                        if purchase_name in owned_name or owned_name in purchase_name or purchase_name in owned_no_price or owned_no_price in purchase_name:
+                            # Score by Jaccard-like overlap
+                            set_a = set(purchase_name.replace(" ", ""))
+                            set_b = set(owned_no_price.replace(" ", ""))
+                            score = len(set_a & set_b) / max(len(set_a | set_b), 1)
+                            if score > best_score:
+                                best_score = score
+                                best_match = o
+                
+                if best_match and best_score > 0.6:
+                    owned = best_match
 
             if owned:
                 # Update the owned item with purchase info
