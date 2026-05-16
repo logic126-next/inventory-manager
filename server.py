@@ -218,11 +218,13 @@ async def get_image_cache_progress():
 
 
 async def _cache_images_wrapper():
-    """Background task: convert mercari CDN URLs to base64 in DB."""
+    """Background task: convert mercari CDN URLs to base64 in DB.
+    Stores original URL in image_url_original, base64 in image_url.
+    """
     _image_cache_state["running"] = True
     try:
         conn = get_connection()
-        # Find items with mercari CDN URLs
+        # Find items with mercari CDN URLs that haven't been cached
         rows = conn.execute(
             "SELECT id, image_url FROM items "
             "WHERE image_url LIKE '%mercdn.net%' "
@@ -250,7 +252,11 @@ async def _cache_images_wrapper():
 
             b64, err = _fetch_image_as_base64(image_url)
             if b64:
-                conn.execute("UPDATE items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (b64, item_id))
+                # Save original URL to image_url_original, base64 to image_url
+                conn.execute(
+                    "UPDATE items SET image_url = ?, image_url_original = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (b64, image_url, item_id)
+                )
                 conn.commit()
                 converted += 1
             else:
@@ -1206,6 +1212,7 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
             price = item.price
             status_text = item.status or ""
             source_url = item.url
+            image_url_original = item.image_url  # Keep original URL
             image_url = item.image_url
             # Convert mercari CDN URL to base64 for DB storage
             if image_url and "mercdn.net" in image_url and not image_url.startswith("data:"):
@@ -1226,13 +1233,13 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
 
             # Check if item already exists (by name + price + platform)
             existing = conn.execute(
-                "SELECT id, status, source_url, image_url FROM items "
+                "SELECT id, status, source_url, image_url, image_url_original FROM items "
                 "WHERE name = ? AND purchase_price = ? AND source_platform = 'mercari_owned'",
                 (name, price),
             ).fetchone()
 
             if existing:
-                # Update status, source_url, and image_url if changed
+                # Update status, source_url, image_url, image_url_original if changed
                 needs_update = False
                 updates = []
                 if existing["status"] != inv_status:
@@ -1244,6 +1251,9 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
                 if image_url and (not existing["image_url"] or existing["image_url"] != image_url):
                     updates.append("image_url = ?")
                     needs_update = True
+                if image_url_original and (not existing["image_url_original"] or existing["image_url_original"] != image_url_original):
+                    updates.append("image_url_original = ?")
+                    needs_update = True
 
                 if needs_update:
                     updates.append("updated_at = CURRENT_TIMESTAMP")
@@ -1254,6 +1264,8 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
                         update_values.append(source_url)
                     if image_url and (not existing["image_url"] or existing["image_url"] != image_url):
                         update_values.append(image_url)
+                    if image_url_original and (not existing["image_url_original"] or existing["image_url_original"] != image_url_original):
+                        update_values.append(image_url_original)
                     update_values.append(existing["id"])
                     conn.execute(
                         f"UPDATE items SET {', '.join(updates)} WHERE id = ?",
@@ -1271,10 +1283,10 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
 
                 cursor = conn.execute(
                     "INSERT INTO items (sku, name, description, source_platform, source_item_id, "
-                    "purchase_price, purchase_date, image_url, source_url, location_id, status, tags) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "purchase_price, purchase_date, image_url, image_url_original, source_url, location_id, status, tags) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (sku, name, "", "mercari_owned", None,
-                     price, purchase_date, image_url, source_url, None,
+                     price, purchase_date, image_url, image_url_original, source_url, None,
                      inv_status, tags_json),
                 )
 

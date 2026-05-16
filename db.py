@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS items (
     purchase_price  INTEGER NOT NULL DEFAULT 0,
     purchase_date   TIMESTAMP,
     image_url       TEXT,
+    image_url_original TEXT,
     source_url      TEXT,
     location_id     INTEGER,
     status          TEXT NOT NULL DEFAULT 'purchased',
@@ -255,6 +256,8 @@ def init_db():
     conn = get_connection()
     try:
         conn.executescript(SCHEMA_SQL)
+        # Migration: add image_url_original column if it doesn't exist
+        conn.executescript("ALTER TABLE items ADD COLUMN IF NOT EXISTS image_url_original TEXT")
         # Insert default settings (ignore if exists)
         for k, v in DEFAULT_SETTINGS.items():
             conn.execute(
