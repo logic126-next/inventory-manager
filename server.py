@@ -6,6 +6,7 @@ Reselling inventory management with profit tracking.
 
 import asyncio
 import base64
+import httpx
 import json
 import os
 import re
@@ -138,6 +139,8 @@ def dict_to_json(obj: Any) -> str:
 # ── Image Upload ────────────────────────────────────────
 _upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads")
 
+_image_cache_state: dict = {"running": False, "progress": {"total": 0, "processed": 0, "converted": 0, "failed": 0}}
+
 @app.post("/api/upload/image")
 async def upload_image(img: ImageUpload):
     """Upload an image (base64 or URL). Returns the image URL path."""
@@ -179,6 +182,94 @@ async def upload_image(img: ImageUpload):
         raise HTTPException(400, f"Failed to decode image: {e}")
     
     return {"url": f"/static/uploads/{filename}"}
+
+
+def _fetch_image_as_base64(image_url: str, timeout: int = 10) -> tuple[str | None, str | None]:
+    """Download an image from URL and return (base64_string, error_reason).""" 
+    if not image_url:
+        return None, "empty url"
+    try:
+        resp = httpx.get(image_url, timeout=timeout, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"})
+        if resp.status_code == 200:
+            content_type = resp.headers.get("content-type", "image/jpeg")
+            b64 = base64.b64encode(resp.content).decode("ascii")
+            return f"data:{content_type};base64,{b64}", None
+        return None, f"HTTP {resp.status_code}"
+    except Exception as e:
+        return None, str(e)[:100]
+
+
+@app.post("/api/images/cache-to-db")
+async def cache_images_to_db():
+    """Convert all Mercari CDN image URLs in DB to Base64 data URIs.
+    Runs as a background task. Returns progress endpoint info.
+    """
+    if _image_cache_state["running"]:
+        return {"status": "running", "progress": _image_cache_state["progress"]}
+
+    asyncio.create_task(_cache_images_wrapper())
+    return {"status": "started", "message": "画像キャッシュを開始しました"}
+
+
+@app.get("/api/images/cache-progress")
+async def get_image_cache_progress():
+    """Get progress of the image caching task."""
+    return _image_cache_state["progress"]
+
+
+async def _cache_images_wrapper():
+    """Background task: convert mercari CDN URLs to base64 in DB."""
+    _image_cache_state["running"] = True
+    try:
+        conn = get_connection()
+        # Find items with mercari CDN URLs
+        rows = conn.execute(
+            "SELECT id, image_url FROM items "
+            "WHERE image_url LIKE '%mercdn.net%' "
+            "AND image_url NOT LIKE 'data:image%'"
+        ).fetchall()
+
+        total = len(rows)
+        converted = 0
+        failed = 0
+
+        for row in rows:
+            try:
+                item_id = row["id"]
+                image_url = row["image_url"]
+            except Exception as e:
+                _image_cache_state["progress"]["error"] = f"Row access error: {e} row={dict(row)}"
+                return
+            _image_cache_state["progress"] = {
+                "total": total,
+                "processed": converted + failed,
+                "converted": converted,
+                "failed": failed,
+                "current": image_url[:60],
+            }
+
+            b64, err = _fetch_image_as_base64(image_url)
+            if b64:
+                conn.execute("UPDATE items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (b64, item_id))
+                conn.commit()
+                converted += 1
+            else:
+                failed += 1
+
+            # Brief pause to avoid rate limiting
+            await asyncio.sleep(0.3)
+
+        _image_cache_state["progress"] = {
+            "total": total,
+            "processed": total,
+            "converted": converted,
+            "failed": failed,
+            "done": True,
+        }
+    except Exception as e:
+        _image_cache_state["progress"]["error"] = str(e)
+    finally:
+        _image_cache_state["running"] = False
 
 
 # ── Items API ───────────────────────────────────────────
@@ -1116,6 +1207,11 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
             status_text = item.status or ""
             source_url = item.url
             image_url = item.image_url
+            # Convert mercari CDN URL to base64 for DB storage
+            if image_url and "mercdn.net" in image_url and not image_url.startswith("data:"):
+                b64, _ = _fetch_image_as_base64(image_url, timeout=15)
+                if b64:
+                    image_url = b64
             # Normalize: /sell/inventory/ → /inventory/
             if source_url:
                 source_url = source_url.replace('/sell/inventory/', '/inventory/')

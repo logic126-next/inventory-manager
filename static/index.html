@@ -277,6 +277,20 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     <div id="api-key-status" style="font-size:12px;color:var(--text2)"></div>
   </div>
 
+  <!-- Image Cache Section -->
+  <div class="card" style="border-color:var(--green);background:rgba(16,185,129,0.03)">
+    <h3 style="margin-bottom:8px">🖼️ 画像をDBにキャッシュ</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">
+      Mercari CDN の画像 URL を Base64 に変換して DB に保存します。Mercari 側の画像が消えても表示されなくなります。<br>
+      同期時の新商品も自動的に Base64 で保存されます。
+    </p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="startImageCache()" id="cache-images-btn">🔄 既存画像をキャッシュ</button>
+      <span id="cache-progress" style="font-size:12px;color:var(--text2)"></span>
+    </div>
+    <div id="cache-status" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
+  </div>
+
   <!-- Synced items list -->
   <div class="card" style="margin-top:12px">
     <div class="card-title">同期済み商品</div>
@@ -1313,6 +1327,79 @@ document.addEventListener('paste', function(e) {
     }
   });
 })();
+
+// ── Image Cache to DB ──────────────────────────────────────────────────
+async function startImageCache() {
+  const btn = document.getElementById("cache-images-btn");
+  const progress = document.getElementById("cache-progress");
+  const status = document.getElementById("cache-status");
+  
+  btn.disabled = true;
+  btn.textContent = "⏳ キャッシュ中...";
+  progress.textContent = "開始しました...";
+  status.textContent = "";
+  
+  try {
+    const resp = await fetch(`${API_BASE}/api/images/cache-to-db`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = await resp.json();
+    
+    if (data.status === "running") {
+      status.textContent = "すでに実行中です";
+      pollCacheProgress();
+      return;
+    }
+    
+    // Start polling progress
+    pollCacheProgress();
+  } catch (e) {
+    status.textContent = "エラー: " + e.message;
+    btn.disabled = false;
+    btn.textContent = "🔄 既存画像をキャッシュ";
+  }
+}
+
+async function pollCacheProgress() {
+  const btn = document.getElementById("cache-images-btn");
+  const progress = document.getElementById("cache-progress");
+  const status = document.getElementById("cache-status");
+  
+  const poll = async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/images/cache-progress`);
+      const data = await resp.json();
+      
+      if (data.total > 0) {
+        const pct = Math.round((data.processed / data.total) * 100);
+        progress.textContent = `${data.processed}/${data.total} (${pct}%) — 成功: ${data.converted} / 失敗: ${data.failed}`;
+        
+        if (data.done) {
+          status.textContent = `完了！ 成功: ${data.converted} / 失敗: ${data.failed}`;
+          btn.disabled = false;
+          btn.textContent = "🔄 既存画像をキャッシュ";
+          return;
+        }
+      }
+      
+      if (data.error) {
+        status.textContent = "エラー: " + data.error;
+        btn.disabled = false;
+        btn.textContent = "🔄 既存画像をキャッシュ";
+        return;
+      }
+      
+      // Still running
+      setTimeout(poll, 1000);
+    } catch (e) {
+      // ignore polling errors
+      setTimeout(poll, 2000);
+    }
+  };
+  
+  poll();
+}
 </script>
 </body>
 </html>

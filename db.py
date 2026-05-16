@@ -181,6 +181,9 @@ class _PGCursor:
         # Convert ? placeholders to %s for psycopg2
         if "?" in sql and params:
             sql = sql.replace("?", "%s")
+        elif "%" in sql and not params:
+            # No params but SQL has % (e.g. LIKE '%foo%') — escape for psycopg2
+            sql = sql.replace("%", "%%")
         # For INSERT into items/sale_records/status_history/locations, add RETURNING id
         upper = sql.strip().upper()
         is_insert = upper.startswith("INSERT")
