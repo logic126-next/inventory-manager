@@ -97,87 +97,128 @@ function generateBookmarklet() {
 
     function extractItems(){
       items=[];seen.clear();
-      var allLinks=document.querySelectorAll('a[href*="/items/"]');
+      // Try multiple selectors for Mercari purchases page
+      var allLinks=document.querySelectorAll('a[href*="/items/"], a[href*="/mypage/purchases/"]');
       for(var i=0;i<allLinks.length;i++){
         var link=allLinks[i];
         var href=link.getAttribute("href");
         if(!href)continue;
-        var fullUrl="https://jp.mercari.com"+href;
+        var fullUrl=href.startsWith("https://") ? href : "https://jp.mercari.com"+href;
         if(seen.has(fullUrl))continue;
         seen.add(fullUrl);
 
-        var card=link.closest("[class*='PurchaseOrder'], [class*='purchase'], [class*='Card'], article, div");
+        // Walk up to find the card container - be more specific
+        var card=link.closest("[data-item-id], [class*='Card'], [class*='PurchaseOrder'], [class*='purchase'], article, [class*='order']");
         if(!card) card=link.parentElement;
+        if(!card) continue;
 
-        var name=link.textContent.trim();
-        if(!name||name.length<2) continue;
+        // Get name - try multiple approaches
+        var name="";
+        var nameEl=card.querySelector('[class*="title"], [class*="Title"], [class*="name"], h3, h4, p');
+        if(nameEl) name=nameEl.textContent.trim();
+        if(!name) name=link.textContent.trim();
+        if(!name||name.length<2||name.length>100) continue;
+        // Filter out navigation text
+        if(name.match(/^(購入|販売|履歴|出品|マイページ|メニュー|ホーム|ログイン|ログアウト|プロフィール)$/i)) continue;
 
+        // Get price
         var price=0;
-        var priceEl=card?.querySelector('[class*="price"], [class*="Price"]');
-        if(priceEl){var ptxt=priceEl.textContent.trim();var pm=ptxt.match(/¥\\s*(\\d[,\\d]*)/);if(pm)price=parseInt(pm[1].replace(/,/g,''));}
+        var priceEl=card.querySelector('[class*="price"], [class*="Price"], [data-testid*="price"]');
+        if(priceEl){var ptxt=priceEl.textContent.trim();var pm=ptxt.match(/¥\s*(\d[,,\d]*)/);if(pm)price=parseInt(pm[1].replace(/,/g,''));}
         if(!price){
-          var allP=card?.querySelectorAll('*')||[];
+          var allP=card.querySelectorAll('*');
           for(var pi=0;pi<allP.length&&pi<30;pi++){
             var pt=allP[pi].textContent.trim();
-            var pmatch=pt.match(/^(¥\\s*)?(\\d[,\\d]+)$/);
+            var pmatch=pt.match(/^(¥\s*)?(\d[,\d]+)$/);
             if(pmatch&&parseInt(pmatch[2].replace(/,/g,''))>100){price=parseInt(pmatch[2].replace(/,/g,''));break;}
           }
         }
 
+        // Get image
         var imageUrl="";
-        var imgEl=card?.querySelector('img');
-        if(imgEl){imageUrl=imgEl.getAttribute("src")||imgEl.getAttribute("data-src")||"";}
+        var imgEl=card.querySelector('img');
+        if(imgEl){imageUrl=imgEl.getAttribute("src")||imgEl.getAttribute("data-src")||imgEl.getAttribute("data-lazy-src")||"";}
 
         items.push({name:name,price:price,status:"",url:fullUrl,image_url:imageUrl});
       }
     }
 
-    setStatus("📋","商品データを抽出中...");
-    extractItems();
+    // Scroll to load all items (infinite scroll)
+    function scrollLoad(){
+      return new Promise(function(resolve){
+        var done=false;
+        var lastCount=0;
+        var maxScrolls=30;
+        var scrollNum=0;
 
-    if(items.length===0){
-      setStatus("⚠️","商品が見つかりませんでした","購入履歴が空か、Mercariのページデザインが変更された可能性があります。");
-      setTimeout(function(){document.body.removeChild(ov);},5000);
-      return;
+        function doScroll(){
+          if(done)return;
+          extractItems();
+          var curCount=items.length;
+
+          if(curCount===lastCount&&scrollNum>3){done=true;resolve();return;}
+          if(scrollNum>=maxScrolls){done=true;resolve();return;}
+          if(lastCount>0&&curCount===lastCount){setTimeout(function(){doScroll();},500);return;}
+
+          lastCount=curCount;
+          scrollNum++;
+          setStatus("🔄","商品を読み込み中...",""+items.length+"件取得 ("+scrollNum+"/"+maxScrolls+")");
+
+          window.scrollBy({top:300,left:0,behavior:'smooth'});
+          setTimeout(function(){doScroll();},800);
+        }
+        doScroll();
+      });
     }
 
-    setStatus("📤",""+items.length+"件をサーバーに送信中...");
+    setStatus("📋","商品を読み込み中...");
+    scrollLoad().then(function(){
+      extractItems();
 
-    var xhr=new XMLHttpRequest();
-    xhr.open("POST",api,true);
-    xhr.setRequestHeader("Content-Type","application/json");
-    xhr.timeout=30000;
-    xhr.onreadystatechange=function(){
-      if(xhr.readyState!==4)return;
-      if(xhr.status===0){
-        setStatus("❌","ネットワークエラー","サーバーに接続できません。同じネットワークか確認してください。");
-        setTimeout(function(){document.body.removeChild(ov);},8000);
+      if(items.length===0){
+        setStatus("⚠️","商品が見つかりませんでした","購入履歴が空か、Mercariのページデザインが変更された可能性があります。");
+        setTimeout(function(){document.body.removeChild(ov);},5000);
         return;
       }
-      try{
-        var resp=JSON.parse(xhr.responseText);
-        if(resp.error){
-          setStatus("❌","エラー",resp.error);
+
+      setStatus("📤",""+items.length+"件をサーバーに送信中...");
+
+      var xhr=new XMLHttpRequest();
+      xhr.open("POST",api,true);
+      xhr.setRequestHeader("Content-Type","application/json");
+      xhr.timeout=30000;
+      xhr.onreadystatechange=function(){
+        if(xhr.readyState!==4)return;
+        if(xhr.status===0){
+          setStatus("❌","ネットワークエラー","サーバーに接続できません。同じネットワークか確認してください。");
           setTimeout(function(){document.body.removeChild(ov);},8000);
           return;
         }
-        setStatus("✅","同期完了！",
-          (resp.created||0)+"件新規 / "+(resp.updated||0)+"件更新 / "+(resp.skipped||0)+"件スキップ");
-        setTimeout(function(){document.body.removeChild(ov);},5000);
-      }catch(e){
-        setStatus("❌","エラー",""+e.message);
-        setTimeout(function(){document.body.removeChild(ov);},5000);
-      }
-    };
-    xhr.onerror=function(){
-      setStatus("❌","ネットワークエラー","サーバーに接続できません。");
-      setTimeout(function(){document.body.removeChild(ov);},8000);
-    };
-    xhr.ontimeout=function(){
-      setStatus("⏱️","タイムアウト","サーバーの応答がありません。");
-      setTimeout(function(){document.body.removeChild(ov);},8000);
-    };
-    xhr.send(JSON.stringify({items:items}));
+        try{
+          var resp=JSON.parse(xhr.responseText);
+          if(resp.error){
+            setStatus("❌","エラー",resp.error);
+            setTimeout(function(){document.body.removeChild(ov);},8000);
+            return;
+          }
+          setStatus("✅","同期完了！",
+            (resp.created||0)+"件新規 / "+(resp.updated||0)+"件更新 / "+(resp.skipped||0)+"件スキップ");
+          setTimeout(function(){document.body.removeChild(ov);},5000);
+        }catch(e){
+          setStatus("❌","エラー",""+e.message);
+          setTimeout(function(){document.body.removeChild(ov);},5000);
+        }
+      };
+      xhr.onerror=function(){
+        setStatus("❌","ネットワークエラー","サーバーに接続できません。");
+        setTimeout(function(){document.body.removeChild(ov);},8000);
+      };
+      xhr.ontimeout=function(){
+        setStatus("⏱️","タイムアウト","サーバーの応答がありません。");
+        setTimeout(function(){document.body.removeChild(ov);},8000);
+      };
+      xhr.send(JSON.stringify({items:items}));
+    });
   }();`;
 
   const encoded = 'javascript:' + encodeURIComponent(bmCode);
