@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mercari 購入履歴同期 - ブックマークレット</title>
 <style>
-  :root { --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--text2:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--purple:#bc8cff;--radius:10px; }
+  :root { --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--text2:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--purple:#bc8cff;--radius:10px; }
   * { margin:0;padding:0;box-sizing:border-box; }
   body { font-family:-apple-system,'Hiragino Sans','Meiryo',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px; }
   .container { max-width:700px;width:100%; }
@@ -34,6 +34,7 @@
 <div class="container">
   <h1>🛒 Mercari 購入履歴同期</h1>
   <p class="subtitle">ブックマークレットで購入履歴をインポート</p>
+
   <div class="card">
     <h3>⚙️ 設定</h3>
     <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Inventory Manager のサーバーアドレスを入力してください。</p>
@@ -41,6 +42,7 @@
       <input type="text" id="server-url" placeholder="https://192.168.1.203/inventory">
     </div>
   </div>
+
   <div class="card">
     <h3>📋 使い方</h3>
     <ol class="steps">
@@ -50,6 +52,7 @@
       <li>完了すると「XX件同期完了」と表示されます。</li>
     </ol>
   </div>
+
   <div class="card">
     <h3>🔖 ブックマークレット</h3>
     <p style="font-size:13px;color:var(--text2);margin-bottom:8px">リンクをブックマークバーにドロップしてください。</p>
@@ -60,217 +63,142 @@
     </div>
     <div id="bookmarklet-output"></div>
   </div>
+
   <a class="back-link" href="/">← Inventory Manager に戻る</a>
 </div>
+
 <script>
 const serverUrl = window.location.origin;
 const base = window.location.pathname.split('/static/')[0];
 document.getElementById('server-url').value = serverUrl + base;
 
-// Store the inline JS code (with SERVER_URL_PLACEHOLDER)
-var INLINE_JS = `(function() {
-  'use strict';
+function generateBookmarklet() {
+  const serverUrl = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
 
-  var serverUrl = window.__MERCARI_SERVER_URL;
-  var api = serverUrl + '/api/scrapers/mercari/purchases/sync';
+  const bmCode = `!function(){
+    var serverUrl="${serverUrl}";
+    var api=serverUrl+"/api/scrapers/mercari/purchases/sync";
 
-  if (!location.hostname.includes('mercari.com')) {
-    alert('Mercari.jpのページで実行してください');
-    return;
-  }
+    if(!location.hostname.includes("mercari.com")){alert("Mercari.jpのページで実行してください");return;}
 
-  // Create overlay
-  var ov = document.createElement('div');
-  ov.id = 'mercari-purchases-overlay';
-  ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;color:#e6edf3';
-  ov.innerHTML = '<div style="text-align:center;padding:40px"><div id="ms-icon" style="font-size:48px;margin-bottom:16px">🛒</div><div id="ms-text" style="font-size:18px;font-weight:600">読み込み中...</div><div id="ms-sub" style="font-size:14px;color:#8b949e;margin-top:8px"></div></div>';
-  document.body.appendChild(ov);
+    var ov=document.createElement("div");
+    ov.id="mercari-purchases-overlay";
+    ov.style.cssText="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;color:#e6edf3";
+    ov.innerHTML='<div style="text-align:center;padding:40px"><div id="ms-icon" style="font-size:48px;margin-bottom:16px">🛒</div><div id="ms-text" style="font-size:18px;font-weight:600">読み込み中...</div><div id="ms-sub" style="font-size:14px;color:#8b949e;margin-top:8px"></div></div>';
+    document.body.appendChild(ov);
 
-  var msText = document.getElementById('ms-text');
-  var msSub = document.getElementById('ms-sub');
-  var msIcon = document.getElementById('ms-icon');
+    var msText=document.getElementById("ms-text");
+    var msSub=document.getElementById("ms-sub");
+    var msIcon=document.getElementById("ms-icon");
 
-  function setStatus(icon, text, sub) {
-    msIcon.textContent = icon;
-    msText.textContent = text;
-    if (sub) msSub.textContent = sub;
-  }
+    function setStatus(icon,text,sub){msIcon.textContent=icon;msText.textContent=text;if(sub)msSub.textContent=sub;}
 
-  var items = [];
-  var seen = new Set();
+    var items=[];
+    var seen=new Set();
 
-  function parseDate(text) {
-    var m = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
-    m = text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
-    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
-    m = text.match(/(\d{1,2})月(\d{1,2})日/);
-    if (m) {
-      var year = new Date().getFullYear();
-      return year + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+    function parseDate(text){
+      var m=text.match(/(\\d{4})年(\\d{1,2})月(\\d{1,2})日/);
+      if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
+      m=text.match(/(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/);
+      if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
+      m=text.match(/(\\d{1,2})月(\\d{1,2})日/);
+      if(m){var y=new Date().getFullYear();return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}
+      return null;
     }
-    return null;
-  }
 
-  function extractItems() {
-    items = [];
-    seen.clear();
-
-    var allImgs = document.querySelectorAll('img');
-    for (var i = 0; i < allImgs.length; i++) {
-      var img = allImgs[i];
-      var src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || '';
-      if (!src || src.length < 10) continue;
-
-      var parent = img.closest('div');
-      if (!parent || parent.textContent.trim().length < 10) continue;
-
-      var ct = parent.textContent.trim();
-
-      // Extract name
-      var name = '';
-      var txts = parent.querySelectorAll('*');
-      for (var t = 0; t < txts.length && t < 20; t++) {
-        if (txts[t].children.length === 0) {
-          var n = txts[t].textContent.trim();
-          if (n.length > 3 && n.length < 100 && !n.includes('\u00a5') && !n.match(/^[0-9,]+$/) && !n.match(/^[0-9\/年月日]+$/)) {
-            name = n;
-            break;
+    function extractItems(){
+      items=[];seen.clear();
+      var imgs=document.querySelectorAll("img");
+      for(var i=0;i<imgs.length;i++){
+        var img=imgs[i];
+        var src=img.getAttribute("src")||img.getAttribute("data-src")||img.getAttribute("data-lazy-src")||"";
+        if(!src||src.length<10)continue;
+        var parent=img.closest("div");
+        if(!parent||parent.textContent.trim().length<10)continue;
+        var ct=parent.textContent.trim();
+        var name="";
+        var txts=parent.querySelectorAll("*");
+        for(var t=0;t<txts.length&&t<20;t++){
+          if(txts[t].children.length===0){
+            var n=txts[t].textContent.trim();
+            if(n.length>3&&n.length<100&&!n.includes("\\u00a5")&&!n.match(/^[0-9,]+$/)&&!n.match(/^[0-9\\/+\\u5e74\\u6708\\u65e5]+$/)){name=n;break;}
           }
         }
+        if(!name||seen.has(name))continue;
+        seen.add(name);
+        var price=0;
+        var pm=ct.match(/\\u00a5\\s*(\\d[\\d,]*)/g);
+        if(pm){for(var pi=0;pi<pm.length;pi++){var pv=parseInt(pm[pi].replace(/[^0-9]/g,""));if(pv>=100&&pv<=9999999){price=pv;break;}}}
+        var purchaseDate=parseDate(ct);
+        var link=parent.querySelector("a");
+        var fullUrl="";
+        if(link){var href=link.getAttribute("href");if(href)fullUrl=href.startsWith("https://")?href:"https://jp.mercari.com"+href;}
+        items.push({name:name,price:price,status:"",url:fullUrl,image_url:src,purchase_date:purchaseDate});
       }
+    }
 
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-
-      // Extract price
-      var price = 0;
-      var pm = ct.match(/\u00a5\s*(\d[\d,]*)/g);
-      if (pm) {
-        for (var pi = 0; pi < pm.length; pi++) {
-          var pv = parseInt(pm[pi].replace(/[^0-9]/g, ''));
-          if (pv >= 100 && pv <= 9999999) {
-            price = pv;
-            break;
-          }
+    function scrollLoad(){
+      return new Promise(function(resolve){
+        var done=false,lastCount=0,scrollNum=0;
+        function doScroll(){
+          if(done)return;
+          extractItems();
+          var cur=items.length;
+          if(cur===lastCount&&scrollNum>3||scrollNum>=30){done=true;resolve();return;}
+          if(lastCount>0&&cur===lastCount){setTimeout(doScroll,500);return;}
+          lastCount=cur;scrollNum++;
+          setStatus("\\ud83d\\udd04","商品を読み込み中...",""+items.length+"件取得");
+          window.scrollBy({top:300,left:0,behavior:"smooth"});
+          setTimeout(doScroll,800);
         }
-      }
-
-      // Extract purchase date
-      var purchaseDate = parseDate(ct);
-
-      // Extract link
-      var link = parent.querySelector('a');
-      var fullUrl = '';
-      if (link) {
-        var href = link.getAttribute('href');
-        if (href) fullUrl = href.startsWith('https://') ? href : 'https://jp.mercari.com' + href;
-      }
-
-      items.push({
-        name: name,
-        price: price,
-        status: '',
-        url: fullUrl,
-        image_url: src,
-        purchase_date: purchaseDate
+        doScroll();
       });
     }
-  }
 
-  function scrollLoad() {
-    return new Promise(function(resolve) {
-      var done = false;
-      var lastCount = 0;
-      var scrollNum = 0;
-
-      function doScroll() {
-        if (done) return;
-        extractItems();
-        var curCount = items.length;
-
-        if (curCount === lastCount && scrollNum > 3) { done = true; resolve(); return; }
-        if (scrollNum >= 30) { done = true; resolve(); return; }
-        if (lastCount > 0 && curCount === lastCount) { setTimeout(doScroll, 500); return; }
-
-        lastCount = curCount;
-        scrollNum++;
-        setStatus('\ud83d\udd04', '商品を読み込み中...', '' + items.length + '件取得');
-
-        window.scrollBy({ top: 300, left: 0, behavior: 'smooth' });
-        setTimeout(doScroll, 800);
+    setStatus("\\ud83d\\udccb","商品を読み込み中...");
+    scrollLoad().then(function(){
+      extractItems();
+      if(items.length===0){
+        setStatus("\\u26a0\\ufe0f","商品が見つかりませんでした","img: "+document.querySelectorAll("img").length+"件");
+        setTimeout(function(){document.body.removeChild(ov);},5000);return;
       }
-      doScroll();
+      var total=items.length;
+      setStatus("\\ud83d\\udce4",total+"件の商品を送信中...","Inventory Managerに送信しています");
+      var result=null,error=null;
+      try{
+        var resp=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:items})});
+        if(resp.ok){result=await resp.json();}
+        else{error="HTTP "+resp.status+" - "+resp.statusText;}
+      }catch(fe){
+        try{
+          var f=document.createElement("form");
+          f.method="POST";f.action=api;f.target="_blank";
+          f.style.display="none";
+          var t=document.createElement("textarea");
+          t.name="items_json";t.value=JSON.stringify({items:items});
+          f.appendChild(t);document.body.appendChild(f);f.submit();document.body.removeChild(f);
+          error="\\u30d5\\u30a9\\u30fc\\u30e0\\u9001\\u4fe1\\u3057\\u307e\\u3057\\u305f\\u3002\\u65b0\\u3057\\u3044\\u30bf\\u30d6\\u3067\\u7d50\\u679c\\u3092\\u78ba\\u8a8d\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044\\u3002";
+        }catch(fe2){
+          try{await navigator.clipboard.writeText(JSON.stringify({items:items}));error="\\u30af\\u30ea\\u30c3\\u30d7\\u30dc\\u30fc\\u30c9\\u306b\\u30b3\\u30d4\\u30fc\\u3057\\u307e\\u3057\\u305f\\u3002";}
+          catch(fe3){error="\\u9001\\u4fe1\\u30a8\\u30e9\\u30fc: "+fe.message;}
+        }
+      }
+      if(result){
+        var created=result.created||0,updated=result.updated||0,skipped=result.skipped||0;
+        setStatus("\\u2705",total+"\\u4ef6\\u540c\\u671f\\u5b8c\\u4e86\\uff01","\\u65b0\\u898f:"+created+" \\u66f4\\u65b0:"+updated+" \\u30b9\\u30ad\\u30c3\\u30d7:"+skipped);
+        msText.style.color="#3fb950";
+      }else if(error&&error.includes("\\u30af\\u30ea\\u30c3\\u30d7\\u30dc\\u30fc\\u30c0")){
+        setStatus("\\ud83d\\udccb",error,"");msText.style.color="#d29922";
+      }else if(error&&error.includes("\\u30bf\\u30d6")){
+        setStatus("\\ud83d\\udd17","\\u65b0\\u3057\\u3044\\u30bf\\u30d6\\u3067\\u51e6\\u7406\\u4e2d...","\\u7d50\\u679c\\u306f\\u65b0\\u3057\\u3044\\u30bf\\u30d6\\u3067\\u78ba\\u8a8d\\u3067\\u304d\\u307e\\u3059");msText.style.color="#58a6ff";
+      }else{
+        setStatus("\\u274c","\\u30a8\\u30e9\\u30fc: "+(error||"\\u4e0d\\u660e"),"\\u518d\\u5ea6\\u304a\\u8a66\\u3057\\u304f\\u3060\\u3055\\u3044");msText.style.color="#f85149";
+      }
+      setTimeout(function(){document.body.removeChild(ov);},result?5000:8000);
     });
-  }
+  }();`;
 
-  setStatus('\ud83d\udccb', '商品を読み込み中...');
-
-  scrollLoad().then(function() {
-    extractItems();
-
-    if (items.length === 0) {
-      setStatus('\u26a0\ufe0f', '商品が見つかりませんでした',
-        'img: ' + document.querySelectorAll('img').length + '件 / server: ' + serverUrl);
-      setTimeout(function() { document.body.removeChild(ov); }, 8000);
-      return;
-    }
-
-    setStatus('\ud83d\udce4', '' + items.length + '件をサーバーに送信中...');
-    msSub.textContent = 'API: ' + api;
-
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', api, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.timeout = 30000;
-    xhr.onreadystatechange = function() {
-      if (xhr.readyState !== 4) return;
-      if (xhr.status === 0) {
-        setStatus('\u274c', 'ネットワークエラー', 'API: ' + api);
-        setTimeout(function() { document.body.removeChild(ov); }, 8000);
-        return;
-      }
-      try {
-        var resp = JSON.parse(xhr.responseText);
-        if (resp.detail) {
-          setStatus('\u274c', 'APIエラー (' + xhr.status + ')', resp.detail + '\n' + api);
-          setTimeout(function() { document.body.removeChild(ov); }, 10000);
-          return;
-        }
-        if (resp.error) {
-          setStatus('\u274c', 'エラー', resp.error);
-          setTimeout(function() { document.body.removeChild(ov); }, 8000);
-          return;
-        }
-        setStatus('\u2705', '同期完了！',
-          (resp.created || 0) + '件新規 / ' + (resp.updated || 0) + '件更新 / ' + (resp.skipped || 0) + '件スキップ');
-        setTimeout(function() { document.body.removeChild(ov); }, 5000);
-      } catch (e) {
-        setStatus('\u274c', 'エラー', '' + e.message + '\n' + xhr.responseText.substring(0, 200));
-        setTimeout(function() { document.body.removeChild(ov); }, 10000);
-      }
-    };
-    xhr.onerror = function() {
-      setStatus('\u274c', 'ネットワークエラー', 'API: ' + api);
-      setTimeout(function() { document.body.removeChild(ov); }, 8000);
-    };
-    xhr.ontimeout = function() {
-      setStatus('\u23f1\ufe0f', 'タイムアウト', 'API: ' + api);
-      setTimeout(function() { document.body.removeChild(ov); }, 8000);
-    };
-    xhr.send(JSON.stringify({ items: items }));
-  });
-
-})();
-`;
-
-function generateBookmarklet() {
-  const url = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
-
-  // Replace placeholder with actual URL and create self-contained bookmarklet
-  var code = INLINE_JS.replace('window.__MERCARI_SERVER_URL', "'" + url + "'");
-
-  const encoded = 'javascript:' + encodeURIComponent(code);
+  const encoded = 'javascript:' + encodeURIComponent(bmCode);
   document.getElementById('bm-link').href = encoded;
   document.getElementById('bookmarklet-output').innerHTML = '<p class="note">OK - bookmarklet generated.</p>';
 }
