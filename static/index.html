@@ -163,7 +163,7 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
   <div class="filters">
     <input type="text" id="inv-search" placeholder="🔍 商品名で検索...">
     <select id="inv-status"><option value="">全状態</option></select>
-    <select id="inv-platform"><option value="">全平台</option><option value="mercari_owned">Mercari</option><option value="amazon_outlet">Amazon</option><option value="other">その他</option></select>
+    <select id="inv-platform"><option value="">全平台</option><option value="mercari_owned">Mercari 持ち物</option><option value="mercari_purchases">Mercari 購入</option><option value="amazon_outlet">Amazon</option><option value="other">その他</option></select>
     <select id="inv-sort">
       <option value="">新着順</option>
       <option value="created_at_asc">古い順</option>
@@ -289,6 +289,19 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
       <span id="cache-progress" style="font-size:12px;color:var(--text2)"></span>
     </div>
     <div id="cache-status" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
+  </div>
+
+  <!-- Purchases Sync Section -->
+  <div class="card" style="border-color:var(--purple);background:rgba(168,85,247,0.03)">
+    <h3 style="margin-bottom:8px">🛒 Mercari 購入履歴同期</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">
+      <a href="https://jp.mercari.com/mypage/purchases" target="_blank" style="color:var(--purple)">購入履歴ページ</a> の商品を一括でインポートします。
+      Cookie を設定後、ボタンを押すだけで完了します。
+    </p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <button class="btn btn-primary btn-sm" onclick="startPurchasesSync()" id="purchases-sync-btn">🛒 購入履歴を同期</button>
+    </div>
+    <div id="purchases-sync-status" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
   </div>
 
   <!-- Synced items list -->
@@ -1176,30 +1189,109 @@ async function triggerMercariSync() {
 }
 
 // ── Load synced items ──────────────────────────────────
-async function loadSyncItems() {
+
+// ── Purchases Sync ─────────────────────────────────────
+let _purchasesPollTimer = null;
+
+async function startPurchasesSync() {
+  const btn = document.getElementById('purchases-sync-btn');
+  const statusEl = document.getElementById('purchases-sync-status');
+  btn.disabled = true;
+  btn.textContent = '⏳ 同期中...';
+  statusEl.textContent = 'Mercari 購入履歴にアクセス中...';
+  statusEl.style.color = 'var(--text2)';
+
   try {
-    const data = await api('/api/items?platform=mercari_owned&per_page=100');
-    const total = data.total;
-    const items = data.items || [];
-    document.getElementById('sync-items-count').textContent = `Mercari 持ち物から同期済み: ${total} 件`;
+    const data = await api('/api/scrapers/mercari/purchases/sync', { method: 'POST' });
+
+    if (data.error) {
+      statusEl.textContent = `❌ ${data.error}`;
+      statusEl.style.color = 'var(--red)';
+      btn.disabled = false;
+      btn.textContent = '🛒 購入履歴を同期';
+      return;
+    }
+
+    // Poll for status
+    if (_purchasesPollTimer) clearInterval(_purchasesPollTimer);
+    _purchasesPollTimer = setInterval(async () => {
+      try {
+        const status = await api('/api/scrapers/mercari/purchases/status');
+        if (status.sync_running) {
+          statusEl.textContent = `⏳ ${status.sync_progress || '処理中...'}`;
+        } else if (status.sync_result) {
+          clearInterval(_purchasesPollTimer);
+          _purchasesPollTimer = null;
+          const r = status.sync_result;
+          statusEl.innerHTML = `✅ <strong>${r.created}</strong>件新規 / <strong>${r.updated}</strong>件更新 / <strong>${r.skipped}</strong>件スキップ (合計${r.total}件)`;
+          statusEl.style.color = 'var(--green)';
+          btn.disabled = false;
+          btn.textContent = '🛒 購入履歴を同期';
+          loadSyncItems();
+        } else if (status.sync_error) {
+          clearInterval(_purchasesPollTimer);
+          _purchasesPollTimer = null;
+          statusEl.textContent = `❌ ${status.sync_error}`;
+          statusEl.style.color = 'var(--red)';
+          btn.disabled = false;
+          btn.textContent = '🛒 購入履歴を同期';
+        }
+      } catch(e) {
+        console.error('Purchases poll error:', e);
+      }
+    }, 1500);
+  } catch(e) {
+    statusEl.textContent = `❌ エラー: ${e.message}`;
+    statusEl.style.color = 'var(--red)';
+    btn.disabled = false;
+    btn.textContent = '🛒 購入履歴を同期';
+    if (_purchasesPollTimer) { clearInterval(_purchasesPollTimer); _purchasesPollTimer = null; }
+  }
+}
+
+// ── Load synced items ──────────────────────────────────
+async function loadSyncItems() {
+   try {
+    const [ownedData, purchasesData] = await Promise.all([
+      api('/api/items?platform=mercari_owned&per_page=100'),
+      api('/api/items?platform=mercari_purchases&per_page=100'),
+    ]);
+    const ownedTotal = ownedData.total;
+    const purchasesTotal = purchasesData.total;
+    const items = ownedData.items || [];
+    const purchasesItems = purchasesData.items || [];
+
+    document.getElementById('sync-items-count').textContent =
+      `Mercari 持ち物: ${ownedTotal} 件 / 購入履歴: ${purchasesTotal} 件`;
 
     const listEl = document.getElementById('sync-items-list');
-    if (items.length === 0) {
+    if (items.length === 0 && purchasesItems.length === 0) {
       listEl.innerHTML = '<div style="font-size:13px;color:var(--text2)">まだ同期されていません</div>';
       return;
     }
 
-    listEl.innerHTML = items.map(item => {
+    const renderItems = (items, label) => items.map(item => {
       const statusLabel = item.status === 'listed' ? '🟢 出品中' : '📦 在庫';
       const link = item.source_url ? `<a href="${item.source_url}" target="_blank" style="color:var(--accent);font-size:12px">商品ページ ↗</a>` : '';
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
         <div>
-          <div>${escHtml(item.name)}</div>
+          <div>${escHtml(item.name)} <span style="font-size:10px;color:var(--text2)">(${label})</span></div>
           <div style="color:var(--text2);font-size:11px">¥${Number(item.purchase_price).toLocaleString()} ${statusLabel}</div>
         </div>
         ${link}
       </div>`;
     }).join('');
+
+    let html = '';
+    if (purchasesItems.length > 0) {
+      html += '<div style="font-size:12px;color:var(--purple);margin-bottom:4px;font-weight:bold">🛒 購入履歴</div>';
+      html += renderItems(purchasesItems, '購入');
+    }
+    if (items.length > 0) {
+      html += '<div style="font-size:12px;color:var(--blue);margin:8px 0 4px;font-weight:bold">📦 持ち物</div>';
+      html += renderItems(items, '持ち物');
+    }
+    listEl.innerHTML = html;
   } catch(e) {
     console.error('loadSyncItems error:', e);
     document.getElementById('sync-items-count').textContent = '読み込みエラー';

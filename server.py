@@ -1186,6 +1186,9 @@ async def delete_mercari_cookie():
 # Global sync state for polling
 _sync_state: dict = {"running": False, "progress": "", "result": None, "error": None}
 
+# ── Mercari Purchases Sync (Playwright) ───────────────
+_purchases_sync_state: dict = {"running": False, "progress": "", "result": None, "error": None}
+
 
 class MercariOwnedItem(BaseModel):
     name: str
@@ -1306,6 +1309,281 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
         }
     finally:
         conn.close()
+
+
+def _save_purchases_to_db(items: list[MercariOwnedItem]) -> dict:
+    """Save Mercari purchases items into inventory DB.
+    Uses source_platform='mercari_purchases' to distinguish from owned items.
+    """
+    conn = get_connection()
+    try:
+        created = 0
+        updated = 0
+        skipped = 0
+
+        for item in items:
+            name = item.name.strip()
+            price = item.price
+            status_text = item.status or "購入済み"
+            source_url = item.url
+            image_url_original = item.image_url
+            image_url = item.image_url
+            # Convert mercari CDN URL to base64
+            if image_url and "mercdn.net" in image_url and not image_url.startswith("data:"):
+                b64, _ = _fetch_image_as_base64(image_url, timeout=15)
+                if b64:
+                    image_url = b64
+
+            # Check if item already exists (by name + price + platform)
+            existing = conn.execute(
+                "SELECT id, status, source_url, image_url, image_url_original FROM items "
+                "WHERE name = ? AND purchase_price = ? AND source_platform = 'mercari_purchases'",
+                (name, price),
+            ).fetchone()
+
+            if existing:
+                needs_update = False
+                updates = []
+                update_values = []
+                if source_url and (not existing["source_url"] or existing["source_url"] != source_url):
+                    updates.append("source_url = ?")
+                    update_values.append(source_url)
+                    needs_update = True
+                if image_url and (not existing["image_url"] or existing["image_url"] != image_url):
+                    updates.append("image_url = ?")
+                    update_values.append(image_url)
+                    needs_update = True
+                if image_url_original and (not existing["image_url_original"] or existing["image_url_original"] != image_url_original):
+                    updates.append("image_url_original = ?")
+                    update_values.append(image_url_original)
+                    needs_update = True
+
+                if needs_update:
+                    updates.append("updated_at = CURRENT_TIMESTAMP")
+                    update_values.append(existing["id"])
+                    conn.execute(
+                        f"UPDATE items SET {', '.join(updates)} WHERE id = ?",
+                        update_values,
+                    )
+                    conn.commit()
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                sku = generate_sku()
+                tags_json = dict_to_json(["mercari_purchases"])
+                purchase_date = datetime.now().strftime("%Y-%m-%d")
+
+                cursor = conn.execute(
+                    "INSERT INTO items (sku, name, description, source_platform, source_item_id, "
+                    "purchase_price, purchase_date, image_url, image_url_original, source_url, location_id, status, tags) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (sku, name, "", "mercari_purchases", None,
+                     price, purchase_date, image_url, image_url_original, source_url, None,
+                     "in_stock", tags_json),
+                )
+
+                conn.execute(
+                    "INSERT INTO status_history (item_id, from_status, to_status, note) "
+                    "VALUES (?, NULL, ?, 'Mercari購入履歴同期')",
+                    (cursor.lastrowid, "in_stock"),
+                )
+                conn.commit()
+                created += 1
+
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "total": len(items),
+        }
+    finally:
+        conn.close()
+
+
+def _extract_purchases_from_page(page) -> list[MercariOwnedItem]:
+    """Extract items from the Mercari purchases page (mypage/purchases).
+
+    The purchases page shows items you've bought. Each item card has:
+    - Item name (link to product page)
+    - Price paid
+    - Purchase date
+    - Seller name
+    - Item status (delivered, etc.)
+    """
+    items = []
+
+    # Get all item links on the purchases page
+    item_links = page.query_selector_all('a[href*="/items/"]')
+    links = []
+    for link in item_links:
+        href = link.get_attribute("href")
+        if href:
+            links.append(href)
+    links = list(dict.fromkeys(links))  # deduplicate preserving order
+
+    # Get all image URLs
+    all_imgs = page.query_selector_all('img')
+    images = []
+    for img in all_imgs:
+        candidates = [
+            img.get_attribute("src") or "",
+            img.get_attribute("data-src") or "",
+            img.get_attribute("data-lazy-src") or "",
+            img.get_attribute("data-original") or "",
+        ]
+        for c in candidates:
+            if c and not c.startswith("data:") and "/photos/m" in c and c not in images:
+                images.append(c)
+
+    # Get text content and parse items
+    body_text = page.inner_text("body")
+    lines = [l.strip() for l in body_text.split("\n") if l.strip()]
+
+    link_idx = 0
+    img_idx = 0
+
+    for i in range(len(lines) - 2):
+        # Pattern: name line, then ¥ line, then status/date line
+        if lines[i + 1].startswith("¥") or "¥" in lines[i + 1]:
+            name = lines[i].strip()
+            price_str = lines[i + 1].strip().replace("¥", "").replace(",", "").strip()
+            status = lines[i + 2].strip()
+
+            try:
+                price = int(price_str)
+            except ValueError:
+                continue
+
+            url = links[link_idx] if link_idx < len(links) else None
+            image_url = images[img_idx] if img_idx < len(images) else None
+
+            if len(name) >= 2 and price > 0:
+                # Map purchases status to a consistent label
+                status_text = status if status else "購入済み"
+                items.append(MercariOwnedItem(
+                    name=name, price=price, status=status_text,
+                    url=url, image_url=image_url
+                ))
+                link_idx += 1
+                img_idx += 1
+                i += 2
+
+    return items
+
+
+def _run_playwright_purchases_sync(cookie_str: str | None = None) -> dict:
+    """Run the Playwright sync for Mercari purchases page."""
+    from playwright.sync_api import sync_playwright
+
+    if not cookie_str:
+        cookie_str = _read_env_value("MERCARI_COOKIE")
+    if not cookie_str:
+        return {"error": "Mercari の Cookie が設定されていません。同期タブで Cookie を入力してください。"}
+
+    _purchases_sync_state["running"] = True
+    _purchases_sync_state["progress"] = "Cookie をパース中..."
+    _purchases_sync_state["error"] = None
+    _purchases_sync_state["result"] = None
+
+    cookies = _parse_cookie_string(cookie_str)
+    if not cookies:
+        return {"error": "Cookie の形式が正しくありません。"}
+
+    _purchases_sync_state["progress"] = f"{len(cookies)} 個の Cookie を読み込みました。ブラウザを起動中..."
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                ],
+            )
+
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                locale="ja-JP",
+            )
+
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => false});
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5],
+                });
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['ja-JP', 'ja', 'en-US', 'en'],
+                });
+                window.chrome = { runtime: {} };
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                    Promise.resolve({state: Notification.permission}) :
+                    originalQuery(parameters)
+                );
+            """)
+
+            _purchases_sync_state["progress"] = "Cookie をブラウザに設定中..."
+            context.add_cookies(cookies)
+
+            page = context.new_page()
+
+            # Navigate to purchases page
+            _purchases_sync_state["progress"] = "Mercari 購入履歴にアクセス中..."
+            page.goto("https://jp.mercari.com/mypage/purchases", wait_until="domcontentloaded", timeout=30000)
+
+            _purchases_sync_state["progress"] = "ページ内容を読み込み中..."
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                page.wait_for_timeout(5000)
+
+            current_url = page.url
+            if "/login" in current_url or "sign_in" in current_url:
+                browser.close()
+                return {"error": f"ログインページにリダイレクトされました ({current_url})。Cookie が期限切れです。"}
+
+            page.wait_for_timeout(3000)
+
+            # Scroll to load more items
+            _purchases_sync_state["progress"] = "すべての商品を読み込み中..."
+            last_height = 0
+            for attempt in range(8):
+                page.evaluate("window.scrollBy(0, 600)")
+                page.wait_for_timeout(1000)
+                new_height = page.evaluate("document.body.scrollHeight")
+                if new_height == last_height:
+                    break
+                last_height = new_height
+
+            # Extract items
+            _purchases_sync_state["progress"] = "商品データを抽出中..."
+            items = _extract_purchases_from_page(page)
+            browser.close()
+
+            if not items:
+                return {"error": "購入履歴の商品が見つかりませんでした。Cookie が有効か確認してください。"}
+
+            _purchases_sync_state["progress"] = f"{len(items)} 件の商品が見つかりました。データベースに保存中..."
+
+            # Save to DB with source_platform = 'mercari_purchases'
+            result = _save_purchases_to_db(items)
+            _purchases_sync_state["result"] = result
+            return result
+
+    except Exception as e:
+        error_msg = f"購入履歴同期に失敗しました: {str(e)}"
+        _purchases_sync_state["error"] = error_msg
+        return {"error": error_msg}
+    finally:
+        _purchases_sync_state["running"] = False
 
 
 def _extract_items_from_page(page) -> list[MercariOwnedItem]:
@@ -1601,6 +1879,58 @@ async def mercari_owned_sync_status():
         "sync_progress": _sync_state["progress"],
         "sync_result": _sync_state.get("result"),
         "sync_error": _sync_state.get("error"),
+    }
+
+
+# ── Bookmarklet API Key Config ──────────────────────────
+# ── Mercari Purchases Sync API ──────────────────────────
+@app.post("/api/scrapers/mercari/purchases/sync")
+async def trigger_mercari_purchases_sync(req: MercariSyncRequest | None = None):
+    """Trigger Mercari purchases page sync using Playwright."""
+    if _purchases_sync_state["running"]:
+        return {
+            "status": "running",
+            "progress": _purchases_sync_state["progress"],
+            "message": "すでに同期が実行中です",
+        }
+    cookie_str = req.cookie_str if req else None
+    asyncio.create_task(_async_purchases_sync_wrapper(cookie_str))
+    return {
+        "status": "started",
+        "message": "購入履歴同期を開始しました",
+    }
+
+
+async def _async_purchases_sync_wrapper(cookie_str: str | None = None):
+    """Wrapper to run purchases Playwright sync in a thread pool."""
+    import concurrent.futures
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        result = await loop.run_in_executor(executor, _run_playwright_purchases_sync, cookie_str)
+    _purchases_sync_state["result"] = result
+
+
+@app.get("/api/scrapers/mercari/purchases/status")
+async def mercari_purchases_sync_status():
+    """Return purchases sync status."""
+    conn = get_connection()
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM items WHERE source_platform = 'mercari_purchases'"
+        ).fetchone()[0]
+        last_sync = conn.execute(
+            "SELECT MAX(updated_at) FROM items WHERE source_platform = 'mercari_purchases'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    return {
+        "total_synced": total,
+        "last_sync_at": last_sync,
+        "sync_running": _purchases_sync_state["running"],
+        "sync_progress": _purchases_sync_state["progress"],
+        "sync_result": _purchases_sync_state.get("result"),
+        "sync_error": _purchases_sync_state.get("error"),
     }
 
 
