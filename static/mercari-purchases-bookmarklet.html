@@ -97,18 +97,28 @@ function generateBookmarklet() {
 
     function extractItems(){
       items=[];seen.clear();
-      // Try multiple selectors for Mercari purchases page
-      var allLinks=document.querySelectorAll('a[href*="/items/"], a[href*="/mypage/purchases/"]');
+      // Get ALL links first to debug
+      var allLinks=document.querySelectorAll('a');
+      var targetLinks=[];
       for(var i=0;i<allLinks.length;i++){
-        var link=allLinks[i];
+        var href=allLinks[i].getAttribute("href");
+        if(!href)continue;
+        // Match Mercari item links: /items/xxx or /inventory/mxxx
+        if(href.includes("/items/")||href.includes("/inventory/")){
+          targetLinks.push(allLinks[i]);
+        }
+      }
+
+      for(var i=0;i<targetLinks.length;i++){
+        var link=targetLinks[i];
         var href=link.getAttribute("href");
         if(!href)continue;
         var fullUrl=href.startsWith("https://") ? href : "https://jp.mercari.com"+href;
         if(seen.has(fullUrl))continue;
         seen.add(fullUrl);
 
-        // Walk up to find the card container - be more specific
-        var card=link.closest("[data-item-id], [class*='Card'], [class*='PurchaseOrder'], [class*='purchase'], article, [class*='order']");
+        // Walk up to find the card container
+        var card=link.closest("[data-item-id], [class*='Card'], [class*='PurchaseOrder'], [class*='purchase'], article, [class*='order'], div[class]");
         if(!card) card=link.parentElement;
         if(!card) continue;
 
@@ -116,15 +126,27 @@ function generateBookmarklet() {
         var name="";
         var nameEl=card.querySelector('[class*="title"], [class*="Title"], [class*="name"], h3, h4, p');
         if(nameEl) name=nameEl.textContent.trim();
+        if(!name){
+          // Try walking children for text
+          var txts=card.querySelectorAll('*');
+          for(var t=0;t<txts.length&&t<20;t++){
+            if(txts[t].children.length===0){
+              var n=txts[t].textContent.trim();
+              if(n.length>3&&n.length<100&&!n.includes('¥')&&!n.match(/^[0-9,]+$/)&&!n.match(/^(購入|販売|履歴|出品|マイページ|メニュー|ホーム|ログイン|ログアウト)$/)){
+                name=n;break;
+              }
+            }
+          }
+        }
         if(!name) name=link.textContent.trim();
         if(!name||name.length<2||name.length>100) continue;
-        // Filter out navigation text
+        // Filter navigation text
         if(name.match(/^(購入|販売|履歴|出品|マイページ|メニュー|ホーム|ログイン|ログアウト|プロフィール)$/i)) continue;
 
         // Get price
         var price=0;
         var priceEl=card.querySelector('[class*="price"], [class*="Price"], [data-testid*="price"]');
-        if(priceEl){var ptxt=priceEl.textContent.trim();var pm=ptxt.match(/¥\s*(\d[,,\d]*)/);if(pm)price=parseInt(pm[1].replace(/,/g,''));}
+        if(priceEl){var ptxt=priceEl.textContent.trim();var pm=ptxt.match(/¥\s*(\d[,\d]*)/);if(pm)price=parseInt(pm[1].replace(/,/g,''));}
         if(!price){
           var allP=card.querySelectorAll('*');
           for(var pi=0;pi<allP.length&&pi<30;pi++){
@@ -176,8 +198,11 @@ function generateBookmarklet() {
       extractItems();
 
       if(items.length===0){
-        setStatus("⚠️","商品が見つかりませんでした","購入履歴が空か、Mercariのページデザインが変更された可能性があります。");
-        setTimeout(function(){document.body.removeChild(ov);},5000);
+        var allLinkCount=document.querySelectorAll('a').length;
+        var itemLinks=document.querySelectorAll('a[href*="/items/"], a[href*="/inventory/"]').length;
+        setStatus("⚠️","商品が見つかりませんでした",
+          "aタグ: "+allLinkCount+"件 / itemsリンク: "+itemLinks+"件 / ページデザインが変更された可能性があります。");
+        setTimeout(function(){document.body.removeChild(ov);},8000);
         return;
       }
 
