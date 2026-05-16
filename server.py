@@ -1196,6 +1196,7 @@ class MercariOwnedItem(BaseModel):
     status: str = ""
     url: str | None = None
     image_url: str | None = None
+    purchase_date: str | None = None  # from purchases bookmarklet
 
 
 class MercariOwnedBatch(BaseModel):
@@ -1236,13 +1237,14 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
 
             # Check if item already exists (by name + price + platform)
             existing = conn.execute(
-                "SELECT id, status, source_url, image_url, image_url_original FROM items "
+                "SELECT id, status, source_url, image_url, image_url_original, purchase_price, purchase_date FROM items "
                 "WHERE name = ? AND purchase_price = ? AND source_platform = 'mercari_owned'",
                 (name, price),
             ).fetchone()
 
             if existing:
                 # Update status, source_url, image_url, image_url_original if changed
+                # Also check if purchase_price/purchase_date came from purchases sync
                 needs_update = False
                 updates = []
                 if existing["status"] != inv_status:
@@ -1279,10 +1281,22 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
                 else:
                     skipped += 1
             else:
-                # Create new item
+                # Create new item — try to get purchase_date from mercari_purchases
                 sku = generate_sku()
                 tags_json = dict_to_json(["mercari_owned"])
                 purchase_date = datetime.now().strftime("%Y-%m-%d")
+
+                # Check if we have purchase info for this item
+                purch = conn.execute(
+                    "SELECT purchase_price, purchase_date FROM items "
+                    "WHERE name = ? AND source_platform = 'mercari_purchases'",
+                    (name,),
+                ).fetchone()
+                if purch:
+                    purchase_date = purch["purchase_date"]
+                    # Also update purchase_price if we have it
+                    if purch["purchase_price"] and purch["purchase_price"] > 0:
+                        price = purch["purchase_price"]
 
                 cursor = conn.execute(
                     "INSERT INTO items (sku, name, description, source_platform, source_item_id, "
@@ -1312,8 +1326,9 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
 
 
 def _save_purchases_to_db(items: list[MercariOwnedItem]) -> dict:
-    """Save Mercari purchases items into inventory DB.
-    Uses source_platform='mercari_purchases' to distinguish from owned items.
+    """Save Mercari purchases data.
+    Strategy: match by name against mercari_owned items and update purchase_price + purchase_date.
+    If no owned match, create as mercari_purchases entry.
     """
     conn = get_connection()
     try:
@@ -1323,73 +1338,52 @@ def _save_purchases_to_db(items: list[MercariOwnedItem]) -> dict:
 
         for item in items:
             name = item.name.strip()
-            price = item.price
-            status_text = item.status or "購入済み"
+            price = item.price or 0
+            purchase_date = item.purchase_date or datetime.now().strftime("%Y-%m-%d")
             source_url = item.url
-            image_url_original = item.image_url
             image_url = item.image_url
-            # Convert mercari CDN URL to base64
-            if image_url and "mercdn.net" in image_url and not image_url.startswith("data:"):
-                b64, _ = _fetch_image_as_base64(image_url, timeout=15)
-                if b64:
-                    image_url = b64
 
-            # Check if item already exists (by name + price + platform)
-            existing = conn.execute(
-                "SELECT id, status, source_url, image_url, image_url_original FROM items "
-                "WHERE name = ? AND purchase_price = ? AND source_platform = 'mercari_purchases'",
-                (name, price),
+            # Try to match against mercari_owned items by name (fuzzy)
+            owned = conn.execute(
+                "SELECT id FROM items WHERE name = ? AND source_platform = 'mercari_owned'",
+                (name,),
             ).fetchone()
 
-            if existing:
-                needs_update = False
-                updates = []
-                update_values = []
-                if source_url and (not existing["source_url"] or existing["source_url"] != source_url):
-                    updates.append("source_url = ?")
-                    update_values.append(source_url)
-                    needs_update = True
-                if image_url and (not existing["image_url"] or existing["image_url"] != image_url):
-                    updates.append("image_url = ?")
-                    update_values.append(image_url)
-                    needs_update = True
-                if image_url_original and (not existing["image_url_original"] or existing["image_url_original"] != image_url_original):
-                    updates.append("image_url_original = ?")
-                    update_values.append(image_url_original)
-                    needs_update = True
-
-                if needs_update:
-                    updates.append("updated_at = CURRENT_TIMESTAMP")
-                    update_values.append(existing["id"])
-                    conn.execute(
-                        f"UPDATE items SET {', '.join(updates)} WHERE id = ?",
-                        update_values,
-                    )
-                    conn.commit()
-                    updated += 1
-                else:
-                    skipped += 1
-            else:
-                sku = generate_sku()
-                tags_json = dict_to_json(["mercari_purchases"])
-                purchase_date = datetime.now().strftime("%Y-%m-%d")
-
-                cursor = conn.execute(
-                    "INSERT INTO items (sku, name, description, source_platform, source_item_id, "
-                    "purchase_price, purchase_date, image_url, image_url_original, source_url, location_id, status, tags) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (sku, name, "", "mercari_purchases", None,
-                     price, purchase_date, image_url, image_url_original, source_url, None,
-                     "in_stock", tags_json),
-                )
-
+            if owned:
+                # Update the owned item with purchase info
                 conn.execute(
-                    "INSERT INTO status_history (item_id, from_status, to_status, note) "
-                    "VALUES (?, NULL, ?, 'Mercari購入履歴同期')",
-                    (cursor.lastrowid, "in_stock"),
+                    "UPDATE items SET purchase_price = ?, purchase_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (price, purchase_date, owned["id"]),
                 )
                 conn.commit()
-                created += 1
+                updated += 1
+            else:
+                # Try mercari_purchases
+                existing = conn.execute(
+                    "SELECT id FROM items WHERE name = ? AND source_platform = 'mercari_purchases'",
+                    (name,),
+                ).fetchone()
+
+                if existing:
+                    skipped += 1
+                else:
+                    sku = generate_sku()
+                    tags_json = dict_to_json(["mercari_purchases"])
+                    cursor = conn.execute(
+                        "INSERT INTO items (sku, name, description, source_platform, source_item_id, "
+                        "purchase_price, purchase_date, image_url, image_url_original, source_url, location_id, status, tags) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (sku, name, "", "mercari_purchases", None,
+                         price, purchase_date, image_url, image_url, source_url, None,
+                         "in_stock", tags_json),
+                    )
+                    conn.execute(
+                        "INSERT INTO status_history (item_id, from_status, to_status, note) "
+                        "VALUES (?, NULL, ?, 'Mercari購入履歴同期')",
+                        (cursor.lastrowid, "in_stock"),
+                    )
+                    conn.commit()
+                    created += 1
 
         return {
             "created": created,

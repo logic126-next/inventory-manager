@@ -529,6 +529,7 @@ async function loadInventory() {
           <td style="cursor:pointer;color:var(--blue)" onclick="showItemDetail(${item.id})">${escHtml(item.name)}</td>
           <td><span class="badge badge-${item.status}">${item.status}</span></td>
           <td>${yen(item.purchase_price)}</td>
+          <td style="font-size:12px;color:var(--text2)">${item.purchase_date || '—'}</td>
           <td>${sale.sale_price ? yen(sale.sale_price) : '—'}</td>
           <td>${profit}</td>
           <td style="text-align:center">${linkCol}</td>

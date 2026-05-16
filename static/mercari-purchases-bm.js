@@ -1,7 +1,6 @@
 (function() {
   'use strict';
 
-  // Read server URL from the script src
   var scriptTag = document.currentScript || (function() {
     var scripts = document.getElementsByTagName('script');
     for (var i = scripts.length - 1; i >= 0; i--) {
@@ -24,7 +23,6 @@
     return;
   }
 
-  // Create overlay
   var ov = document.createElement('div');
   ov.id = 'mercari-purchases-overlay';
   ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;color:#e6edf3';
@@ -44,6 +42,21 @@
   var items = [];
   var seen = new Set();
 
+  function parseDate(text) {
+    // Try to parse Japanese dates: 2025年1月15日, 2025/01/15, 1月15日
+    var m = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+    m = text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+    // If no year, assume current year
+    m = text.match(/(\d{1,2})月(\d{1,2})日/);
+    if (m) {
+      var year = new Date().getFullYear();
+      return year + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+    }
+    return null;
+  }
+
   function extractItems() {
     items = [];
     seen.clear();
@@ -59,26 +72,13 @@
 
       var ct = parent.textContent.trim();
 
-      // Find price-like numbers (3+ digits)
-      var pm = ct.match(/\d{3,}[\d,]*/g);
-      if (!pm) continue;
-
-      var price = 0;
-      for (var pi = 0; pi < pm.length; pi++) {
-        var pv = parseInt(pm[pi].replace(/,/g, ''));
-        if (pv >= 100 && pv <= 9999999) {
-          price = pv;
-          break;
-        }
-      }
-
-      // Extract name
+      // Extract name - first meaningful text node
       var name = '';
       var txts = parent.querySelectorAll('*');
       for (var t = 0; t < txts.length && t < 20; t++) {
         if (txts[t].children.length === 0) {
           var n = txts[t].textContent.trim();
-          if (n.length > 3 && n.length < 100 && !n.includes('¥') && !n.match(/^[0-9,]+$/)) {
+          if (n.length > 3 && n.length < 100 && !n.includes('¥') && !n.match(/^[0-9,]+$/) && !n.match(/^[0-9/年月日]+$/)) {
             name = n;
             break;
           }
@@ -88,6 +88,22 @@
       if (!name || seen.has(name)) continue;
       seen.add(name);
 
+      // Extract price - find price-like numbers
+      var price = 0;
+      var pm = ct.match(/¥\s*(\d[\d,]*)/g);
+      if (pm) {
+        for (var pi = 0; pi < pm.length; pi++) {
+          var pv = parseInt(pm[pi].replace(/[^0-9]/g, ''));
+          if (pv >= 100 && pv <= 9999999) {
+            price = pv;
+            break;
+          }
+        }
+      }
+
+      // Extract purchase date
+      var purchaseDate = parseDate(ct);
+
       var link = parent.querySelector('a');
       var fullUrl = '';
       if (link) {
@@ -95,7 +111,14 @@
         if (href) fullUrl = href.startsWith('https://') ? href : 'https://jp.mercari.com' + href;
       }
 
-      items.push({ name: name, price: price, status: '', url: fullUrl, image_url: src });
+      items.push({
+        name: name,
+        price: price,
+        status: '',
+        url: fullUrl,
+        image_url: src,
+        purchase_date: purchaseDate
+      });
     }
   }
 
@@ -132,7 +155,8 @@
     extractItems();
 
     if (items.length === 0) {
-      setStatus('\u26a0\ufe0f', '商品が見つかりませんでした', 'img: ' + document.querySelectorAll('img').length + '件');
+      setStatus('\u26a0\ufe0f', '商品が見つかりませんでした',
+        'img: ' + document.querySelectorAll('img').length + '件');
       setTimeout(function() { document.body.removeChild(ov); }, 5000);
       return;
     }
