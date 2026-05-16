@@ -126,6 +126,13 @@ tr:hover td { background: var(--bg3); }
 .disc-card.selected { border-color: var(--blue); background: rgba(88,166,255,0.05); }
 input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; }
 
+/* Image paste zone */
+.image-paste-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: .2s; min-height: 80px; display: flex; align-items: center; justify-content: center; }
+.image-paste-zone:hover, .image-paste-zone.dragover { border-color: var(--blue); background: rgba(88,166,255,0.05); }
+.image-paste-zone #add-image-placeholder { pointer-events: none; }
+.image-paste-zone.has-image #add-image-placeholder { display: none; }
+.image-paste-zone.has-image #add-image-preview { display: block; }
+
 /* Toast */
 @keyframes fadeInUp { from { opacity:0; transform:translateX(-50%) translateY(20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
 </style>
@@ -292,7 +299,21 @@ input[type="checkbox"].disc-check { width: 18px; height: 18px; accent-color: var
     <div class="form-group"><label>購入価格 (¥)</label><input id="add-price" type="number" min="0" value="0"></div>
     <div class="form-group"><label>購入日</label><input id="add-date" type="date"></div>
     <div class="form-group"><label>商品URL</label><input id="add-url" placeholder="https://..."></div>
-    <div class="form-group"><label>画像URL</label><input id="add-image" placeholder="https://..."></div>
+    <div class="form-group"><label>画像URL</label><input id="add-image-url" placeholder="https://..."></div>
+    <div class="form-group">
+      <label>画像を貼り付け（Ctrl+V / クリックして貼り付け）</label>
+      <div id="add-image-paste" class="image-paste-zone" onclick="this.querySelector('input').click()">
+        <div id="add-image-preview" style="display:none">
+          <img id="add-image-preview-img" src="" style="max-width:100%;max-height:120px;border-radius:6px">
+          <button type="button" class="btn btn-sm btn-danger" onclick="event.stopPropagation();clearAddImage()" style="margin-top:6px">✕ 削除</button>
+        </div>
+        <div id="add-image-placeholder">
+          <div style="font-size:24px;margin-bottom:4px">📷</div>
+          <div style="font-size:12px;color:var(--text2)">画像を貼り付けてください</div>
+        </div>
+      </div>
+    </div>
+    <input type="hidden" id="add-image-base64">
     <div class="form-group"><label>タグ (カンマ区切り)</label><input id="add-tags" placeholder="3C, 限定, ゲーム機"></div>
     <div class="form-group"><label>メモ</label><textarea id="add-desc"></textarea></div>
     <div class="modal-actions">
@@ -501,10 +522,26 @@ function showAddItemModal() {
   document.getElementById('add-price').value = '0';
   document.getElementById('add-date').value = new Date().toISOString().split('T')[0];
   document.getElementById('add-url').value = '';
-  document.getElementById('add-image').value = '';
+  document.getElementById('add-image-url').value = '';
   document.getElementById('add-tags').value = '';
   document.getElementById('add-desc').value = '';
+  clearAddImage();
   showModal('modal-add-item');
+}
+
+function clearAddImage() {
+  document.getElementById('add-image-base64').value = '';
+  document.getElementById('add-image-preview').style.display = 'none';
+  document.getElementById('add-image-placeholder').style.display = '';
+  document.getElementById('add-image-paste').classList.remove('has-image');
+}
+
+function setAddImageBase64(base64) {
+  document.getElementById('add-image-base64').value = base64;
+  document.getElementById('add-image-preview-img').src = base64;
+  document.getElementById('add-image-preview').style.display = 'block';
+  document.getElementById('add-image-placeholder').style.display = 'none';
+  document.getElementById('add-image-paste').classList.add('has-image');
 }
 
 async function submitAddItem() {
@@ -513,6 +550,23 @@ async function submitAddItem() {
 
   const tagsStr = document.getElementById('add-tags').value;
   const tags = tagsStr ? tagsStr.split(/[,、]/).map(t => t.trim()).filter(Boolean) : [];
+
+  // Resolve image URL
+  let imageUrl = document.getElementById('add-image-url').value.trim();
+  const base64 = document.getElementById('add-image-base64').value;
+  if (base64 && !imageUrl) {
+    try {
+      const uploadRes = await fetch(API + '/api/upload/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: base64 }),
+      });
+      const uploadData = await uploadRes.json();
+      imageUrl = uploadData.url;
+    } catch(e) {
+      console.error('Image upload failed:', e);
+    }
+  }
 
   try {
     await api('/api/items', {
@@ -523,7 +577,7 @@ async function submitAddItem() {
         purchase_price: parseInt(document.getElementById('add-price').value) || 0,
         purchase_date: document.getElementById('add-date').value,
         source_url: document.getElementById('add-url').value,
-        image_url: document.getElementById('add-image').value,
+        image_url: imageUrl,
         tags,
         description: document.getElementById('add-desc').value,
       }),
@@ -1203,6 +1257,62 @@ async function checkSyncStatus() {
     alert('エラー: ' + e.message);
   }
 }
+
+// ══════════════════════════════════════════════════
+// Image paste handlers for add item modal
+// ══════════════════════════════════════════════════
+function _handleImageFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    setAddImageBase64(e.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+// Global paste listener - only when modal is open
+document.addEventListener('paste', function(e) {
+  const modal = document.getElementById('modal-add-item');
+  if (!modal.classList.contains('show')) return;
+  
+  const items = e.clipboardData.items;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.startsWith('image/')) {
+      e.preventDefault();
+      const file = items[i].getAsFile();
+      _handleImageFile(file);
+      break;
+    }
+  }
+});
+
+// Drag & drop on paste zone
+(function() {
+  const zone = document.getElementById('add-image-paste');
+  if (!zone) return;
+  
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  
+  zone.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+  });
+  
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith('image/')) {
+        _handleImageFile(file);
+      }
+    }
+  });
+})();
 </script>
 </body>
 </html>

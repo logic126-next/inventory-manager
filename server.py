@@ -5,15 +5,17 @@ Reselling inventory management with profit tracking.
 """
 
 import asyncio
+import base64
 import json
 import os
 import re
+import uuid
 from datetime import datetime
 from typing import Any
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -113,6 +115,12 @@ class SettingsUpdate(BaseModel):
     settings: dict[str, str]
 
 
+class ImageUpload(BaseModel):
+    """Accept base64 image data or a direct URL."""
+    data: str | None = None  # base64 encoded image
+    url: str | None = None   # direct image URL
+
+
 # ── Helpers ─────────────────────────────────────────────
 def row_to_dict(row) -> dict:
     return dict(row) if row else {}
@@ -125,6 +133,52 @@ def generate_sku() -> str:
 
 def dict_to_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False)
+
+
+# ── Image Upload ────────────────────────────────────────
+_upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads")
+
+@app.post("/api/upload/image")
+async def upload_image(img: ImageUpload):
+    """Upload an image (base64 or URL). Returns the image URL path."""
+    if img.url:
+        # If it's already a URL, just return it
+        return {"url": img.url}
+    
+    if not img.data:
+        raise HTTPException(400, "No image data provided")
+    
+    # Ensure upload directory exists
+    os.makedirs(_upload_dir, exist_ok=True)
+    
+    # Decode base64 data
+    if img.data.startswith("data:image"):
+        # Strip the data: prefix
+        header, base64_data = img.data.split(",", 1)
+    else:
+        base64_data = img.data
+    
+    # Detect extension from header or default to png
+    if "jpeg" in (header or "").lower() or "jpg" in (header or "").lower():
+        ext = "jpg"
+    elif "gif" in (header or "").lower():
+        ext = "gif"
+    elif "webp" in (header or "").lower():
+        ext = "webp"
+    else:
+        ext = "png"
+    
+    filename = f"{uuid.uuid4().hex[:16]}.{ext}"
+    filepath = os.path.join(_upload_dir, filename)
+    
+    try:
+        image_bytes = base64.b64decode(base64_data)
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to decode image: {e}")
+    
+    return {"url": f"/static/uploads/{filename}"}
 
 
 # ── Items API ───────────────────────────────────────────
@@ -1373,7 +1427,7 @@ class MercariSyncRequest(BaseModel):
 
 
 @app.post("/api/scrapers/mercari/owned/sync")
-async def trigger_mercari_sync(req: MercariSyncRequest | None = None, request: Request | None = None):
+async def trigger_mercari_sync(req: MercariSyncRequest | None = None, x_api_key: str | None = Header(None)):
     """Trigger server-side Mercari owned items sync using Playwright with stealth + cookies, or accept pre-parsed items from JSON upload.
 
     Auth: SSO cookie (for browser UI) OR X-API-Key header (for bookmarklet).
@@ -1381,7 +1435,7 @@ async def trigger_mercari_sync(req: MercariSyncRequest | None = None, request: R
     # API key check (for bookmarklet)
     api_key_config = _get_bookmarklet_api_key()
     if api_key_config:
-        api_key = request.headers.get("x-api-key", "") if request else ""
+        api_key = x_api_key or ""
         if not api_key or api_key != api_key_config:
             raise HTTPException(status_code=403, detail="APIキーが無効です")
     if _sync_state["running"]:
