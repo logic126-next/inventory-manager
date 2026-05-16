@@ -70,11 +70,11 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8080
 
 ```bash
 # 起動 / 停止
-launchctl load ~/Library/LaunchAgents/com.logic126.inventory-manager.plist
-launchctl unload ~/Library/LaunchAgents/com.logic126.inventory-manager.plist
+launchctl load ~/Library/LaunchAgents/com.logic126.inventory-manager-8080.plist
+launchctl unload ~/Library/LaunchAgents/com.logic126.inventory-manager-8080.plist
 
 # クイック再起動（設定変更後）
-launchctl kickstart -k gui/$(id -u)/com.logic126.inventory-manager
+launchctl kickstart -k gui/$(id -u)/com.logic126.inventory-manager-8080
 ```
 
 ## Web Dashboard
@@ -94,9 +94,10 @@ launchctl kickstart -k gui/$(id -u)/com.logic126.inventory-manager
 ### 機能
 
 - **在庫管理**: 商品 CRUD / 状態変更 / 販売記録 / 保管場所管理
+- **画像管理**: クリップボード貼り付け・ドラッグ&ドロップで画像アップロード / Mercari 画像を Base64 で DB 永続化
 - **利益分析**: 累計利益 / 今月利益 / 利益率 / プラットフォーム別比較 / 月別推移
 - **スクレイパー連携**: Mercari Hunter / Amazon Hunter の商品を検索・フィルタして在庫にインポート
-- **Mercari 持ち物同期**: ブックマークレットまたは Cookie 方式で一括同期
+- **Mercari 持ち物同期**: ブックマークレットまたは Cookie 方式で一括同期（画像も Base64 化）
 - **保管場所**: 倉庫・部屋などの保管場所管理
 - **ソート機能**: 購入価格 / 販売価格 / 利益 / 登録日でソート
 
@@ -137,6 +138,14 @@ launchctl kickstart -k gui/$(id -u)/com.logic126.inventory-manager
 | GET | `/api/dashboard/summary` | 総合サマリー（状態別カウント・累計利益・今月利益） |
 | GET | `/api/dashboard/profit?platform=` | プラットフォーム別利益 |
 | GET | `/api/dashboard/profit/monthly?months=` | 月別利益推移 |
+
+### 画像
+
+| メソッド | エンドポイント | 説明 |
+|---------|---------------|------|
+| POST | `/api/upload/image` | 画像アップロード（Base64 → ファイル保存） |
+| POST | `/api/images/cache-to-db` | Mercari CDN 画像を Base64 で DB にキャッシュ（一括変換） |
+| GET | `/api/images/cache-progress` | 画像キャッシュの進捗確認 |
 
 ### スクレイパー連携
 
@@ -219,6 +228,31 @@ Mercari の「持ち物一覧」ページから所有商品を Inventory Manager
 
 - URL に `jp.mercari.com` を含む画像のみを保持（外部画像は除外）
 - 既に登録されている商品はスキップ（重複防止）
+- Mercari CDN 画像は自動で Base64 に変換して DB に保存
+
+---
+
+## 画像管理
+
+### 画像アップロード
+
+商品の画像を以下の方法で登録可能：
+
+- **クリップボード貼り付け** (Ctrl+V / ⌘V)
+- **ドラッグ & ドロップ**
+- **ファイル選択**
+
+画像は `/static/uploads/` に保存され、DB にはパスが記録される。
+
+### 画像を DB に Base64 として永続化
+
+Mercari の画像 URL（`static.mercdn.net`）は Mercari 側の出品削除などで表示されなくなる可能性がある。
+これを防ぐために、画像を Base64 data URI として DB に保存する。
+
+- **同期時**: Mercari 持ち物同期で取得した画像は自動で Base64 変換
+- **既存画像の一括変換**: 設定ページの「🖼️ 画像をDBにキャッシュ」から実行
+
+`image_url` 列（`TEXT` 型）に `data:image/jpeg;base64,...` 形式で保存される。
 
 ---
 
@@ -227,10 +261,6 @@ Mercari の「持ち物一覧」ページから所有商品を Inventory Manager
 ### Mercari 自動ログイン（Playwright）は使用不可
 
 reCAPTCHA により自動ログインがブロックされるため、Cookie 方式またはブックマークレットを使用。
-
-### Mercari の商品画像
-
-Mercari Hunter から取得した商品には画像 URL が含まれない場合がある。商品ページを直接クロールすることで補完可能。
 
 ### 商品画像の統一サイズ
 
