@@ -161,17 +161,19 @@ function generateBookmarklet() {
 
     function scrollLoad(){
       return new Promise(function(resolve){
-        var done=false,lastCount=0,scrollNum=0;
+        var done=false,lastCount=0,scrollNum=0,stuckCount=0;
+        var maxScrolls=20;
+        var maxStuck=3;
         function doScroll(){
           if(done)return;
           extractItems();
           var cur=items.length;
-          if(cur===lastCount&&scrollNum>3||scrollNum>=30){done=true;resolve();return;}
-          if(lastCount>0&&cur===lastCount){setTimeout(doScroll,500);return;}
+          if(cur===lastCount){stuckCount++;}else{stuckCount=0;}
+          if(stuckCount>=maxStuck||scrollNum>=maxScrolls){done=true;resolve();return;}
           lastCount=cur;scrollNum++;
-          setStatus("\\ud83d\\udd04","商品を読み込み中...",""+items.length+"件取得");
-          window.scrollBy({top:300,left:0,behavior:"smooth"});
-          setTimeout(doScroll,800);
+          setStatus("\\ud83d\\udd04","商品を読み込み中...",""+items.length+"件取得 ("+scrollNum+"/"+maxScrolls+")");
+          window.scrollBy({top:300,left:0,behavior:"instant"});
+          setTimeout(doScroll,600);
         }
         doScroll();
       });
