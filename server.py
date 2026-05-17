@@ -320,8 +320,10 @@ async def list_items(
             "profit_desc": "sr.net_profit DESC",
             "created_at_desc": "i.created_at DESC",
             "created_at_asc": "i.created_at ASC",
+            "purchase_date_desc": "i.purchase_date DESC NULLS LAST",
+            "purchase_date_asc": "i.purchase_date ASC NULLS FIRST",
         }
-        order_clause = sort_map.get(sort, "i.created_at DESC")
+        order_clause = sort_map.get(sort, "i.purchase_date DESC NULLS LAST")
 
         # For sale_price/profit sorting, need LEFT JOIN with latest sale
         if sort in ("sale_price_asc", "sale_price_desc", "profit_asc", "profit_desc"):
