@@ -301,8 +301,11 @@ async def list_items(
             where.append("status = ?")
             params.append(status)
         if platform:
-            where.append("source_platform = ?")
-            params.append(platform)
+            if platform == "mercari":
+                where.append("i.source_platform LIKE 'mercari_%'")
+            else:
+                where.append("i.source_platform = ?")
+                params.append(platform)
         if search:
             where.append("(i.name LIKE ? OR i.description LIKE ?)")
             params.extend([f"%{search}%", f"%{search}%"])
