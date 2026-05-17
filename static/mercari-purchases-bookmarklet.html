@@ -93,7 +93,7 @@ function generateBookmarklet() {
 
     function setStatus(icon,text,sub){msIcon.textContent=icon;msText.textContent=text;if(sub)msSub.textContent=sub;}
 
-    var VERSION="2026-05-17 v4";
+    var VERSION="2026-05-17 v5";
     var items=[];
     var seen=new Set();
     var debugInfo=[];
@@ -161,19 +161,23 @@ function generateBookmarklet() {
       }
     }
 
-    function scrollLoad(){
+ function scrollLoad(){
       return new Promise(function(resolve){
         var done=false,lastCount=0,scrollNum=0,stuckCount=0;
-        var maxScrolls=20;
+        var maxScrolls=15;
         var maxStuck=3;
+        var startTime=Date.now();
+        var maxMs=12000;
         function doScroll(){
           if(done)return;
+          if(Date.now()-startTime>maxMs){done=true;resolve();return;}
           extractItems();
           var cur=items.length;
           if(cur===lastCount){stuckCount++;}else{stuckCount=0;}
           if(stuckCount>=maxStuck||scrollNum>=maxScrolls){done=true;resolve();return;}
           lastCount=cur;scrollNum++;
-          setStatus("\\ud83d\\udd04","商品を読み込み中...",""+cur+"件取得 ("+scrollNum+"/"+maxScrolls+") | "+VERSION);
+          var elapsed=Math.round((Date.now()-startTime)/1000);
+          setStatus("\\ud83d\\udd04",""+cur+"件読み込み中 ("+scrollNum+"/"+maxScrolls+")",""+elapsed+"s | "+VERSION);
           window.scrollBy({top:300,left:0,behavior:"instant"});
           setTimeout(doScroll,600);
         }
