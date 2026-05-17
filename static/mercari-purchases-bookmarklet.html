@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mercari 購入履歴同期 - ブックマークレット</title>
 <style>
-  :root { --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--text2:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--purple:#bc8cff;--radius:10px; }
+  :root { --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d; --text:#e6edf3;--text2:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--purple:#bc8cff;--radius:10px; }
   * { margin:0;padding:0;box-sizing:border-box; }
   body { font-family:-apple-system,'Hiragino Sans','Meiryo',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px; }
   .container { max-width:700px;width:100%; }
@@ -76,6 +76,7 @@ function generateBookmarklet() {
   const serverUrl = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
 
   const bmCode = `!function(){
+    var VERSION="2026-05-17 v6";
     var serverUrl="${serverUrl}";
     var api=serverUrl+"/api/scrapers/mercari/purchases/sync";
 
@@ -92,14 +93,12 @@ function generateBookmarklet() {
     var msIcon=document.getElementById("ms-icon");
 
     function setStatus(icon,text,sub){msIcon.textContent=icon;msText.textContent=text;if(sub)msSub.textContent=sub;}
+    setStatus("📋","準備中...",""+VERSION);
 
-    var VERSION="2026-05-17 v5";
     var items=[];
     var seen=new Set();
-    var debugInfo=[];
 
     function parseDate(text){
-      // Mercari購入履歴 format: "2026/02/11 21:01" or "2026/2/11"
       var m=text.match(/(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/);
       if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
       m=text.match(/(\\d{4})年(\\d{1,2})月(\\d{1,2})日/);
@@ -109,51 +108,34 @@ function generateBookmarklet() {
       return null;
     }
 
+    // Phase 1: Extract items from currently visible content
+    // Use requestAnimationFrame to let UI render first
     function extractItems(){
       items=[];seen.clear();
-      // Strategy: find all date stamps first, then match with items
-      // Mercari購入履歴 shows dates like "2026/02/11 21:01"
-      var allText=document.body.innerText;
-      var dateMatches=[];
-      var dm;
-      while((dm=/(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/.exec(allText))!==null){
-        var d=dm[1]+"-"+dm[2].padStart(2,"0")+"-"+dm[3].padStart(2,"0");
-        // Only keep dates in 2025-2027 range
-        if(dm[1]>="2025"&&dm[1]<="2027")dateMatches.push(d);
-      }
-      // Deduplicate adjacent duplicates
-      var dates=[];
-      for(var di=0;di<dateMatches.length;di++){
-        if(di===0||dateMatches[di]!==dateMatches[di-1])dates.push(dateMatches[di]);
-      }
-
       var imgs=document.querySelectorAll("img");
+      setStatus("🔄","img要素: "+imgs.length+"件","抽出中... | "+VERSION);
       for(var i=0;i<imgs.length;i++){
         var img=imgs[i];
         var src=img.getAttribute("src")||img.getAttribute("data-src")||img.getAttribute("data-lazy-src")||"";
         if(!src||src.length<10)continue;
         var parent=img.closest("div");
-        if(!parent||parent.textContent.trim().length<10)continue;
+        if(!parent)continue;
         var ct=parent.textContent.trim();
+        if(ct.length<10)continue;
         var name="";
         var txts=parent.querySelectorAll("*");
         for(var t=0;t<txts.length&&t<20;t++){
           if(txts[t].children.length===0){
             var n=txts[t].textContent.trim();
-            if(n.length>3&&n.length<100&&!n.includes("\\u00a5")&&!n.match(/^[0-9,]+$/)&&!n.match(/^[0-9\\/+\\u5e74\\u6708\\u65e5]+$/)){name=n;break;}
+            if(n.length>3&&n.length<100&&!n.includes("¥")&&!n.match(/^[0-9,]+$/)&&!n.match(/^[0-9\\/+年月日]+$/)){name=n;break;}
           }
         }
         if(!name||seen.has(name))continue;
         seen.add(name);
         var price=0;
-        var pm=ct.match(/\\u00a5\\s*(\\d[\\d,]*)/g);
+        var pm=ct.match(/¥\\s*(\\d[\\d,]*)/g);
         if(pm){for(var pi=0;pi<pm.length;pi++){var pv=parseInt(pm[pi].replace(/[^0-9]/g,""));if(pv>=100&&pv<=9999999){price=pv;break;}}}
-        // Try to get date from parent, fallback to sequential date list
         var purchaseDate=parseDate(ct);
-        if(!purchaseDate&&dates.length>0){
-          // Use the first date as fallback (items are shown newest first)
-          purchaseDate=dates[Math.min(items.length,dates.length-1)];
-        }
         var link=parent.querySelector("a");
         var fullUrl="";
         if(link){var href=link.getAttribute("href");if(href)fullUrl=href.startsWith("https://")?href:"https://jp.mercari.com"+href;}
@@ -161,49 +143,74 @@ function generateBookmarklet() {
       }
     }
 
- function scrollLoad(){
+    // Phase 2: Scroll to load more content, then re-extract
+    function scrollAndExtract(){
       return new Promise(function(resolve){
-        var done=false,lastCount=0,scrollNum=0,stuckCount=0;
-        var maxScrolls=15;
-        var maxStuck=3;
-        var startTime=Date.now();
-        var maxMs=12000;
-        function doScroll(){
-          if(done)return;
-          if(Date.now()-startTime>maxMs){done=true;resolve();return;}
-          extractItems();
-          var cur=items.length;
-          if(cur===lastCount){stuckCount++;}else{stuckCount=0;}
-          if(stuckCount>=maxStuck||scrollNum>=maxScrolls){done=true;resolve();return;}
-          lastCount=cur;scrollNum++;
-          var elapsed=Math.round((Date.now()-startTime)/1000);
-          setStatus("\\ud83d\\udd04",""+cur+"件読み込み中 ("+scrollNum+"/"+maxScrolls+")",""+elapsed+"s | "+VERSION);
-          window.scrollBy({top:300,left:0,behavior:"instant"});
-          setTimeout(doScroll,600);
+        var scrollNum=0;
+        var maxScrolls=10;
+        var prevCount=0;
+        function step(){
+          window.scrollBy({top:400,left:0,behavior:"instant"});
+          scrollNum++;
+          setTimeout(function(){
+            extractItems();
+            var cur=items.length;
+            setStatus("🔄",""+cur+"件取得 (scroll:"+scrollNum+")",""+VERSION);
+            if(scrollNum>=maxScrolls||cur===prevCount){
+              resolve();return;
+            }
+            prevCount=cur;
+            step();
+          },1000);
         }
-        doScroll();
+        step();
       });
     }
 
-   // Main execution
-    (async function(){
-      setStatus("\ud83d\udccb","商品を読み込み中...",""+VERSION);
-      await scrollLoad();
+    // Main execution - use setTimeout to let overlay render first
+    setTimeout(function(){
+      // First pass: extract visible items
       extractItems();
-      if(items.length===0){
-        var imgCount=document.querySelectorAll("img").length;
-        setStatus("\u26a0\ufe0f","商品が見つかりませんでした","img: "+imgCount+"件 | "+VERSION);
-        setTimeout(function(){document.body.removeChild(ov);},5000);return;
-      }
+      setStatus("🔄",""+items.length+"件取得","スクロール読み込み中... | "+VERSION);
+
+      // Second pass: scroll to load more
+      setTimeout(function(){
+        scrollAndExtract().then(function(){
+          // Final extraction
+          extractItems();
+          if(items.length===0){
+            var imgCount=document.querySelectorAll("img").length;
+            setStatus("⚠️","商品が見つかりませんでした","img: "+imgCount+"件 | "+VERSION);
+            setTimeout(function(){document.body.removeChild(ov);},5000);return;
+          }
+          var total=items.length;
+          setStatus("📤",""+total+"件を送信中...",""+VERSION);
+          sendItems();
+        });
+      },500);
+    },100);
+
+    function sendItems(){
       var total=items.length;
-      setStatus("\ud83d\udce4",total+"件の商品を送信中...","Inventory Managerに送信しています");
       var result=null,error=null;
       try{
-        var resp=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:items})});
-        if(resp.ok){result=await resp.json();}
-        else{error="HTTP "+resp.status+" - "+resp.statusText;}
+        var resp=fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:items})});
+        if(resp&&resp.then){
+          resp.then(function(r){
+            if(r.ok){return r.json();}
+            throw new Error("HTTP "+r.status);
+          }).then(function(data){
+            result=data;
+            var created=result.created||0,updated=result.updated||0,skipped=result.skipped||0;
+            setStatus("✅",""+total+"件同期完了！","新規:"+created+" 更新:"+updated+" スキップ:"+skipped);
+            msText.style.color="#3fb950";
+            setTimeout(function(){document.body.removeChild(ov);},5000);
+          }).catch(function(e){fallbackSend(e.message);});
+        }
       }catch(fe){
-        // Fallback: hidden form POST (bypasses CORS)
+        fallbackSend(fe.message);
+      }
+      function fallbackSend(errMsg){
         try{
           var f=document.createElement("form");
           f.method="POST";f.action=api;f.target="_blank";
@@ -211,35 +218,20 @@ function generateBookmarklet() {
           var t=document.createElement("textarea");
           t.name="items_json";t.value=JSON.stringify({items:items});
           f.appendChild(t);document.body.appendChild(f);f.submit();document.body.removeChild(f);
-          error="フォーム送信しました。新しいタブで結果を確認してください。";
+          setStatus("🔗","新しいタブで処理中...",""+VERSION);
+          msText.style.color="#58a6ff";
+          setTimeout(function(){document.body.removeChild(ov);},5000);
         }catch(fe2){
-          // Last resort: copy to clipboard
-          try{
-            await navigator.clipboard.writeText(JSON.stringify({items:items}));
-            error="クリップボードにコピーしました。";
-          }catch(fe3){
-            error="送信エラー: "+fe.message;
-          }
+          setStatus("❌","エラー: "+(errMsg||"不明"),"再試してください");msText.style.color="#f85149";
+          setTimeout(function(){document.body.removeChild(ov);},8000);
         }
       }
-      if(result){
-        var created=result.created||0,updated=result.updated||0,skipped=result.skipped||0;
-        setStatus("\u2705",total+"件同期完了\uff01","新規:"+created+" 更新:"+updated+" スキップ:"+skipped);
-        msText.style.color="#3fb950";
-      }else if(error&&error.includes("クリップボード")){
-        setStatus("\ud83d\udccb",error,"");msText.style.color="#d29922";
-      }else if(error&&error.includes("タブ")){
-        setStatus("\ud83d\udd17","新しいタブで処理中...","結果は新しいタブで確認できます");msText.style.color="#58a6ff";
-      }else{
-        setStatus("\u274c","エラー: "+(error||"不明"),"再試してください");msText.style.color="#f85149";
-      }
-      setTimeout(function(){document.body.removeChild(ov);},result?5000:8000);
-    })();
+    }
   }();`;
 
   const encoded = 'javascript:' + encodeURIComponent(bmCode);
   document.getElementById('bm-link').href = encoded;
-  document.getElementById('bookmarklet-output').innerHTML = '<p class="note">OK - bookmarklet generated.</p>';
+  document.getElementById('bookmarklet-output').innerHTML = '<p class="note">OK - bookmarklet generated. Version: 2026-05-17 v6</p>';
 }
 
 function copyBookmarkletURL() {
