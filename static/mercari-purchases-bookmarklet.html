@@ -76,7 +76,7 @@ function generateBookmarklet() {
   const serverUrl = document.getElementById('server-url').value.trim().replace(/\/+$/, '');
 
   const bmCode = `!function(){
-    var VERSION="2026-05-17 v6";
+    var VERSION="2026-05-17 v7";
     var serverUrl="${serverUrl}";
     var api=serverUrl+"/api/scrapers/mercari/purchases/sync";
 
@@ -97,21 +97,30 @@ function generateBookmarklet() {
 
     var items=[];
     var seen=new Set();
+    var allDates=[]; // 全页面日付一覧(時間付き)
 
    function parseDate(text){
       var m=text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
       if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0")+" "+m[4]+":"+m[5]+":00";
       m=text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
       if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0")+" 00:00:00";
-      m=text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-      if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0")+" 00:00:00";
-      m=text.match(/(\d{1,2})月(\d{1,2})日/);
-      if(m){var y=new Date().getFullYear();return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0")+" 00:00:00";}
       return null;
     }
 
+   function extractAllDates(){
+      // Mercari購入履歴: 日付はページ全体から抽出(各商品の親divにはない)
+      allDates=[];
+      var text=document.body.innerText;
+      var m;
+      while((m=/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/.exec(text))!==null){
+        if(m[1]>="2025"&&m[1]<="2027"){
+          var d=m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0")+" "+m[4]+":"+m[5]+":00";
+          if(allDates.length===0||allDates[allDates.length-1]!==d)allDates.push(d);
+        }
+      }
+    }
+
     // Phase 1: Extract items from currently visible content
-    // Use requestAnimationFrame to let UI render first
     function extractItems(){
       items=[];seen.clear();
       var imgs=document.querySelectorAll("img");
@@ -135,9 +144,10 @@ function generateBookmarklet() {
         if(!name||seen.has(name))continue;
         seen.add(name);
         var price=0;
-        var pm=ct.match(/¥\\s*(\\d[\\d,]*)/g);
+        var pm=ct.match(/¥\s*(\d[\d,]*)/g);
         if(pm){for(var pi=0;pi<pm.length;pi++){var pv=parseInt(pm[pi].replace(/[^0-9]/g,""));if(pv>=100&&pv<=9999999){price=pv;break;}}}
-        var purchaseDate=parseDate(ct);
+        // 日付は全ページ日付一覧から順に割り当て
+        var purchaseDate=allDates[Math.min(items.length,allDates.length-1)]||null;
         var link=parent.querySelector("a");
         var fullUrl="";
         if(link){var href=link.getAttribute("href");if(href)fullUrl=href.startsWith("https://")?href:"https://jp.mercari.com"+href;}
@@ -171,6 +181,10 @@ function generateBookmarklet() {
 
     // Main execution - use setTimeout to let overlay render first
     setTimeout(function(){
+      // Extract all dates from page first
+      extractAllDates();
+      setStatus("📅","日付: "+allDates.length+"件取得",""+VERSION);
+
       // First pass: extract visible items
       extractItems();
       setStatus("🔄",""+items.length+"件取得","スクロール読み込み中... | "+VERSION);
@@ -233,7 +247,7 @@ function generateBookmarklet() {
 
   const encoded = 'javascript:' + encodeURIComponent(bmCode);
   document.getElementById('bm-link').href = encoded;
-  document.getElementById('bookmarklet-output').innerHTML = '<p class="note">OK - bookmarklet generated. Version: 2026-05-17 v6</p>';
+  document.getElementById('bookmarklet-output').innerHTML = '<p class="note">OK - bookmarklet generated. Version: 2026-05-17 v7</p>';
 }
 
 function copyBookmarkletURL() {
