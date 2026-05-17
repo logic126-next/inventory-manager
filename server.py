@@ -1227,11 +1227,6 @@ def _save_items_to_db(items: list[MercariOwnedItem]) -> dict:
             source_url = item.url
             image_url_original = item.image_url  # Keep original URL
             image_url = item.image_url
-            # Convert mercari CDN URL to base64 for DB storage
-            if image_url and "mercdn.net" in image_url and not image_url.startswith("data:"):
-                b64, _ = _fetch_image_as_base64(image_url, timeout=15)
-                if b64:
-                    image_url = b64
             # Normalize: /sell/inventory/ → /inventory/
             if source_url:
                 source_url = source_url.replace('/sell/inventory/', '/inventory/')
