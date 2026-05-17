@@ -124,7 +124,11 @@ class ImageUpload(BaseModel):
 
 # ── Helpers ─────────────────────────────────────────────
 def row_to_dict(row) -> dict:
-    return dict(row) if row else {}
+    d = dict(row) if row else {}
+    # Format datetime fields as date strings
+    if d.get("purchase_date") and hasattr(d["purchase_date"], "strftime"):
+        d["purchase_date"] = d["purchase_date"].strftime("%Y-%m-%d %H:%M:%S")
+    return d
 
 
 def generate_sku() -> str:

@@ -41,14 +41,16 @@
   var seen = new Set();
 
   function parseDate(text) {
-    var m = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+    var m = text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
+    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0') + ' ' + m[4] + ':' + m[5] + ':00';
+    m = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0') + ' 00:00:00';
     m = text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
-    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0') + ' 00:00:00';
     m = text.match(/(\d{1,2})月(\d{1,2})日/);
     if (m) {
       var year = new Date().getFullYear();
-      return year + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+      return year + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0') + ' 00:00:00';
     }
     return null;
   }
